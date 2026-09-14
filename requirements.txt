@@ -1,4 +1,4 @@
-python-telegram-bot
-pymongo
+pyrogram
+tgcrypto
+motor
 flask
-python-dotenv
