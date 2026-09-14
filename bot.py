@@ -1,17 +1,20 @@
-import os
 import asyncio
+import sys
+
+# Force event loop creation for Python 3.14+ compatibility
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+import os
 import logging
 from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
-
-# Fix for Python 3.14+ asyncio event loop in main thread
-try:
-    asyncio.get_event_loop()
-except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
 
 # Enable logging
 logging.basicConfig(level=logging.INFO)
@@ -154,7 +157,6 @@ async def add_account_cb(client, callback: CallbackQuery):
 async def unified_text_handler(client, message: Message):
     user_id = message.from_user.id
     
-    # 1. Check Admin States First
     if user_id in admin_states:
         state = admin_states[user_id]
         del admin_states[user_id]
@@ -196,7 +198,6 @@ async def unified_text_handler(client, message: Message):
             await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\nSuccess: `{success}`\nFailed: `{failed}`")
         return
 
-    # 2. Check User Interactive States
     if user_id not in temp_sessions:
         return
     
@@ -332,7 +333,6 @@ async def ad_worker(user_id):
         userbot = Client(f"worker_{user_id}", session_string=account["session_string"], api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await userbot.start()
 
-        # Handle auto-reply if enabled
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
             s = await settings_col.find_one({"user_id": user_id})
