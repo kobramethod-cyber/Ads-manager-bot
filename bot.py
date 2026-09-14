@@ -64,21 +64,24 @@ async def is_admin(user_id: int):
     return bool(admin)
 
 async def check_forcesub(client, user_id):
-    channels = await forcesub_col.find().to_list(length=100)
-    if not channels:
-        return True
-    
-    not_joined = []
-    for ch in channels:
-        ch_id = ch["channel"]
-        try:
-            member = await client.get_chat_member(ch_id, user_id)
-            if member.status in ["left", "kicked"]:
-                not_joined.append(ch_id)
-        except Exception:
-            not_joined.append(ch_id)
-            
-    return not_joined
+    try:
+        channels = await forcesub_col.find().to_list(length=100)
+        if not channels:
+            return []  # Yahan fixed kar diya hai taaki empty list return ho agar channel na ho
+        
+        not_joined = []
+        for ch in channels:
+            ch_id = ch["channel"]
+            try:
+                member = await client.get_chat_member(ch_id, user_id)
+                if member.status in ["left", "kicked"]:
+                    not_joined.append(ch_id)
+            except Exception:
+                pass
+                
+        return not_joined
+    except Exception:
+        return []
 
 # --- /start Command & Main Dashboard ---
 @bot.on_message(filters.command("start") & filters.private)
@@ -93,7 +96,8 @@ async def start_handler(client, message: Message):
     if not_joined and not await is_admin(user_id):
         buttons = []
         for ch in not_joined:
-            buttons.append([InlineKeyboardButton(f"Join {ch}", url=f"https://t.me/{ch.replace('@','').replace('-100','')}")])
+            clean_ch = ch.replace('@','').replace('-100','')
+            buttons.append([InlineKeyboardButton(f"Join Channel", url=f"https://t.me/{clean_ch}")])
         buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_forcesub")])
         await message.reply("⚠️ **Please join our update channels first to use this bot!**", reply_markup=InlineKeyboardMarkup(buttons))
         return
