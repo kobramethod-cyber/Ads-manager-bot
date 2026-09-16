@@ -408,7 +408,7 @@ async def ad_worker(bot_client, user_id):
         # Real-time live auto-listener to dynamically harvest group IDs as messages flow in
         discovered_groups = set()
 
-        @userbot.on_message(filters.group | filters.supergroup)
+        @userbot.on_message(filters.group)
         async def live_group_harvester(client, message):
             if message.chat:
                 discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
