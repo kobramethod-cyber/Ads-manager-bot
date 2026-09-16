@@ -17,7 +17,7 @@ from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Enable logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # --- Configuration & Environment Variables ---
@@ -67,7 +67,7 @@ async def check_forcesub(client, user_id):
     try:
         channels = await forcesub_col.find().to_list(length=100)
         if not channels:
-            return []  # Yahan fixed kar diya hai taaki empty list return ho agar channel na ho
+            return []
         
         not_joined = []
         for ch in channels:
@@ -129,7 +129,7 @@ async def show_dashboard(message_or_query, edit=False):
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Add Account", callback_data="add_account"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
+        [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
         [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval"), InlineKeyboardButton("▶️ Run Ads", callback_data="run_ads")],
         [InlineKeyboardButton("⏹ Stop Ads", callback_data="stop_ads"), InlineKeyboardButton("🤖 Auto Reply", callback_data="auto_reply")],
         [InlineKeyboardButton("ℹ️ About", callback_data="about_bot")]
@@ -149,10 +149,51 @@ async def check_forcesub_cb(client, callback: CallbackQuery):
         await callback.answer("✅ Verified successfully!")
         await show_dashboard(callback, edit=True)
 
-# --- Add Account Flow ---
+# --- Manage & Remove Accounts Flow ---
+@bot.on_callback_query(filters.regex("manage_accounts"))
+async def manage_accounts_cb(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    accounts = await accounts_col.find({"user_id": user_id}).to_list(length=20)
+    
+    if not accounts:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Add Account", callback_data="add_account")],
+            [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+        ])
+        await callback.message.edit_text("📋 **Your Accounts:**\n\nYou haven't added any Telegram accounts yet.", reply_markup=keyboard)
+        return
+
+    keyboard_buttons = []
+    for acc in accounts:
+        keyboard_buttons.append([InlineKeyboardButton(f"📱 {acc['phone']} (❌ Remove)", callback_data=f"rem_acc_{acc['phone']}")])
+    
+    keyboard_buttons.append([InlineKeyboardButton("➕ Add Another Account", callback_data="add_account")])
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
+    
+    await callback.message.edit_text("📋 **Your Hosted Accounts:**\nClick on any account below to remove it:", reply_markup=InlineKeyboardMarkup(keyboard_buttons))
+
+@bot.on_callback_query(filters.regex(r"^rem_acc_"))
+async def remove_account_cb(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    phone = callback.data.replace("rem_acc_", "")
+    
+    await accounts_col.delete_one({"user_id": user_id, "phone": phone})
+    
+    if user_id in active_workers:
+        active_workers[user_id].cancel()
+        del active_workers[user_id]
+        await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Stopped ⛔"}}, upsert=True)
+        
+    await callback.answer(f"✅ Account {phone} removed successfully!", show_alert=True)
+    await manage_accounts_cb(client, callback)
+
 @bot.on_callback_query(filters.regex("add_account"))
 async def add_account_cb(client, callback: CallbackQuery):
     user_id = callback.from_user.id
+    acc_count = await accounts_col.count_documents({"user_id": user_id})
+    if acc_count >= 20:
+        await callback.answer("⚠️ Maximum account limit (20) reached!", show_alert=True)
+        return
     temp_sessions[user_id] = {"step": "waiting_phone"}
     await callback.message.edit_text("Send your phone number with country code.\nExample: `+919876543210`")
 
@@ -325,17 +366,33 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.edit_text("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker ---
-async def ad_worker(user_id):
+# --- Run & Stop Ads Worker with Live User Logs ---
+async def ad_worker(bot_client, user_id):
+    log_msg = None
     try:
+        logger.info(f"Ad worker started for user {user_id}")
+        
+        # Send initial log status message to user's private chat
+        log_msg = await bot_client.send_message(
+            user_id, 
+            "🚀 **Ad Worker Initialized!**\nConnecting userbot and fetching groups..."
+        )
+        
         account = await accounts_col.find_one({"user_id": user_id})
         ad = await ads_col.find_one({"user_id": user_id})
         
         if not account or not ad:
+            logger.warning(f"Ad worker for {user_id}: Account or Ad text missing!")
+            if log_msg:
+                await log_msg.edit_text("❌ **Error:** Account or Advertisement text is missing!")
             return
             
         userbot = Client(f"worker_{user_id}", session_string=account["session_string"], api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await userbot.start()
+        logger.info(f"Userbot session started successfully for user {user_id}")
+        
+        if log_msg:
+            await log_msg.edit_text("✅ **Userbot Connected Successfully!**\nScanning dialogs and groups...")
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -343,34 +400,92 @@ async def ad_worker(user_id):
             if s and s.get("auto_reply") and s.get("auto_reply_text"):
                 try:
                     await message.reply(s["auto_reply_text"])
-                except Exception:
-                    pass
+                    logger.info(f"Auto-reply sent to user {message.from_user.id}")
+                except Exception as e:
+                    logger.error(f"Auto-reply error: {e}")
         
         while True:
             settings = await settings_col.find_one({"user_id": user_id})
             if not settings or settings.get("ad_status") != "Running 🚀":
+                logger.info(f"Ad worker for {user_id} stopped via status check.")
+                if log_msg:
+                    await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
                 break
                 
+            logger.info(f"Fetching dialogs for userbot {user_id} to post ads...")
+            dialog_count = 0
+            sent_count = 0
+            failed_count = 0
+            fetched_groups_info = ""
+            
             async for dialog in userbot.get_dialogs():
                 if dialog.chat.type in ["group", "supergroup"]:
+                    dialog_count += 1
+                    chat_title = dialog.chat.title or "Unnamed Group"
+                    chat_id = dialog.chat.id
                     try:
-                        await userbot.send_message(dialog.chat.id, ad["text"])
-                        await asyncio.sleep(2)
+                        await userbot.send_message(chat_id, ad["text"])
+                        sent_count += 1
+                        logger.info(f"Successfully sent ad to group: {chat_title} ({chat_id})")
+                        fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
+                        await asyncio.sleep(3)
                     except FloodWait as fw:
+                        logger.warning(f"FloodWait hit! Sleeping for {fw.value} seconds.")
+                        if log_msg:
+                            try:
+                                await log_msg.edit_text(f"⏳ **FloodWait Notice:** Sleeping for {fw.value}s...")
+                            except:
+                                pass
                         await asyncio.sleep(fw.value)
                         try:
-                            await userbot.send_message(dialog.chat.id, ad["text"])
-                        except:
-                            pass
-                    except Exception:
-                        pass
+                            await userbot.send_message(chat_id, ad["text"])
+                            sent_count += 1
+                            logger.info(f"Successfully sent ad after FloodWait to: {chat_title}")
+                            fetched_groups_info += f"\n• {chat_title} ➔ Sent (After Wait) ✅"
+                        except Exception as e:
+                            failed_count += 1
+                            logger.error(f"Failed to send ad after FloodWait to {chat_id}: {e}")
+                            fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+                    except Exception as e:
+                        failed_count += 1
+                        logger.error(f"Could not send ad to group {chat_title} ({chat_id}): {e}")
+                        fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+            
+            summary_text = (
+                f"📊 **Ad Cycle Report:**\n\n"
+                f"• Total Groups Found: `{dialog_count}`\n"
+                f"• Successfully Sent: `{sent_count}`\n"
+                f"• Failed / Restricted: `{failed_count}`\n\n"
+                f"📋 **Groups Status Details:**\n"
+                f"{fetched_groups_info[:3000]}" # Truncate if too long for telegram message limits
+            )
+            
+            if log_msg:
+                try:
+                    await log_msg.edit_text(summary_text)
+                except Exception as ex:
+                    logger.error(f"Failed to update log message: {ex}")
+            
+            logger.info(f"Ad posting cycle finished for user {user_id}. Found {dialog_count} groups, sent to {sent_count} groups.")
             
             interval_mins = settings.get("interval", 5)
+            logger.info(f"Ad worker sleeping for {interval_mins} minutes...")
+            if log_msg:
+                try:
+                    await bot_client.send_message(user_id, f"💤 Cycle completed. Next round will start after `{interval_mins}` minutes.")
+                except:
+                    pass
+            
             await asyncio.sleep(interval_mins * 60)
             
         await userbot.stop()
     except Exception as e:
-        logger.error(f"Worker error for {user_id}: {e}")
+        logger.error(f"Critical Worker error for user {user_id}: {e}", exc_info=True)
+        if log_msg:
+            try:
+                await log_msg.edit_text(f"❌ **Critical Worker Error:** `{str(e)}`")
+            except:
+                pass
 
 @bot.on_callback_query(filters.regex("run_ads"))
 async def run_ads_cb(client, callback: CallbackQuery):
@@ -387,10 +502,11 @@ async def run_ads_cb(client, callback: CallbackQuery):
     if user_id in active_workers:
         active_workers[user_id].cancel()
 
-    task = asyncio.create_task(ad_worker(user_id))
+    # Pass bot client instance so worker can send logs directly to the user
+    task = asyncio.create_task(ad_worker(client, user_id))
     active_workers[user_id] = task
     
-    await callback.answer("🚀 Advertisement started!")
+    await callback.answer("🚀 Advertisement started! Check your chat for live logs.")
     await show_dashboard(callback, edit=True)
 
 @bot.on_callback_query(filters.regex("stop_ads"))
