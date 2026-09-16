@@ -366,7 +366,7 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.edit_text("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with Live User Logs ---
+# --- Run & Stop Ads Worker with Fixed Group Fetching & Live Logs ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
@@ -392,7 +392,7 @@ async def ad_worker(bot_client, user_id):
         logger.info(f"Userbot session started successfully for user {user_id}")
         
         if log_msg:
-            await log_msg.edit_text("✅ **Userbot Connected Successfully!**\nScanning dialogs and groups...")
+            await log_msg.edit_text("✅ **Userbot Connected Successfully!**\nSyncing dialogs and fetching groups...")
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -418,8 +418,22 @@ async def ad_worker(bot_client, user_id):
             failed_count = 0
             fetched_groups_info = ""
             
-            async for dialog in userbot.get_dialogs():
-                if dialog.chat.type in ["group", "supergroup"]:
+            # Retry mechanism to ensure dialogs are fetched properly (Pyrogram sometimes returns empty on first call)
+            dialogs_list = []
+            for attempt in range(3):
+                try:
+                    async for dialog in userbot.get_dialogs():
+                        dialogs_list.append(dialog)
+                    if dialogs_list:
+                        break
+                except Exception as ex:
+                    logger.warning(f"Attempt {attempt+1} failed to fetch dialogs: {ex}")
+                await asyncio.sleep(2)
+            
+            logger.info(f"Total dialogs collected for user {user_id}: {len(dialogs_list)}")
+
+            for dialog in dialogs_list:
+                if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
                     dialog_count += 1
                     chat_title = dialog.chat.title or "Unnamed Group"
                     chat_id = dialog.chat.id
@@ -457,7 +471,7 @@ async def ad_worker(bot_client, user_id):
                 f"• Successfully Sent: `{sent_count}`\n"
                 f"• Failed / Restricted: `{failed_count}`\n\n"
                 f"📋 **Groups Status Details:**\n"
-                f"{fetched_groups_info[:3000]}" # Truncate if too long for telegram message limits
+                f"{fetched_groups_info[:3000] if fetched_groups_info else 'No groups found in dialogs!'}"
             )
             
             if log_msg:
@@ -502,7 +516,6 @@ async def run_ads_cb(client, callback: CallbackQuery):
     if user_id in active_workers:
         active_workers[user_id].cancel()
 
-    # Pass bot client instance so worker can send logs directly to the user
     task = asyncio.create_task(ad_worker(client, user_id))
     active_workers[user_id] = task
     
