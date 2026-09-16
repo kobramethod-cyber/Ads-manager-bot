@@ -14,6 +14,8 @@ from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, FloodWait
+from pyrogram.raw.functions.messages import GetDialogs
+from pyrogram.raw.types import InputPeerEmpty
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Enable logging
@@ -366,7 +368,7 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.edit_text("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with Advanced Auto-Discovery Multi-Method Fetching ---
+# --- Run & Stop Ads Worker with Raw MTProto Deep-Level Extraction ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
@@ -374,7 +376,7 @@ async def ad_worker(bot_client, user_id):
         
         log_msg = await bot_client.send_message(
             user_id, 
-            "🚀 **Ad Worker Initialized!**\nConnecting userbot and fetching all groups automatically..."
+            "🚀 **Ad Worker Initialized!**\nConnecting userbot and running deep raw MTProto group scanner..."
         )
         
         account = await accounts_col.find_one({"user_id": user_id})
@@ -391,11 +393,7 @@ async def ad_worker(bot_client, user_id):
         logger.info(f"Userbot session started successfully for user {user_id}")
         
         if log_msg:
-            await log_msg.edit_text("✅ **Userbot Connected!**\nScanning joined chats & groups...")
-
-        # Force session initialization by touching 'me'
-        me = await userbot.get_me()
-        logger.info(f"Userbot authenticated as: {me.first_name} ({me.id})")
+            await log_msg.edit_text("✅ **Userbot Connected!**\nExtracting chats via Raw Protocol...")
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -407,6 +405,14 @@ async def ad_worker(bot_client, user_id):
                 except Exception as e:
                     logger.error(f"Auto-reply error: {e}")
         
+        # Real-time live auto-listener to dynamically harvest group IDs as messages flow in
+        discovered_groups = set()
+
+        @userbot.on_message(filters.group | filters.supergroup)
+        async def live_group_harvester(client, message):
+            if message.chat:
+                discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
+
         while True:
             settings = await settings_col.find_one({"user_id": user_id})
             if not settings or settings.get("ad_status") != "Running 🚀":
@@ -420,51 +426,57 @@ async def ad_worker(bot_client, user_id):
             fetched_groups_info = ""
             chat_ids_to_target = set()
             
-            # --- AGGRESSIVE AUTO-DISCOVERY STRATEGY ---
-            
-            # Method A: Pull via userbot dialogs iterator (limit 500)
+            # --- DEEP RAW MTPROTO BYPASS FETCHING ---
             try:
-                async for dialog in userbot.get_dialogs(limit=500):
-                    if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
-                        chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
-            except Exception as e:
-                logger.error(f"Method A (get_dialogs) error: {e}")
+                # Direct low-level MTProto query bypassing standard high-level dialog filters
+                r = await userbot.invoke(
+                    GetDialogs(
+                        offset_date=0,
+                        offset_id=0,
+                        offset_peer=InputPeerEmpty(),
+                        limit=500,
+                        hash=0
+                    )
+                )
+                for chat in r.chats:
+                    # Check if it's a group or supergroup
+                    if hasattr(chat, "title") and (chat.__class__.__name__ in ["Chat", "Channel"]):
+                        # If it's a channel, make sure it's a supergroup (megagroup)
+                        if chat.__class__.__name__ == "Channel":
+                            if getattr(chat, "megagroup", False):
+                                chat_ids_to_target.add((int(f"-100{chat.id}"), chat.title))
+                        else:
+                            chat_ids_to_target.add((int(f"-{chat.id}"), chat.title))
+            except Exception as raw_err:
+                logger.error(f"Raw MTProto GetDialogs error: {raw_err}")
 
-            # Method B: Pull via userbot get_chats API (Direct list of all joined dialog peers)
-            if len(chat_ids_to_target) == 0:
-                logger.warning("Method A returned 0 groups. Switching to Method B (get_chats)...")
-                try:
-                    async for chat in userbot.get_chats():
-                        if chat.type in ["group", "supergroup"]:
-                            chat_ids_to_target.add((chat.id, chat.title or "Unnamed Group"))
-                except Exception as e:
-                    logger.error(f"Method B (get_chats) error: {e}")
+            # Merge any groups discovered via live listener
+            for g_id, g_title in discovered_groups:
+                chat_ids_to_target.add((g_id, g_title))
 
-            # Method C: Raw Client iteration fallback via MTProto direct search
-            if len(chat_ids_to_target) == 0:
-                logger.warning("Method B returned 0 groups. Switching to Method C (Raw Dialogs)...")
+            # Fallback to standard iterator if raw returned empty
+            if not chat_ids_to_target:
                 try:
-                    async for dialog in userbot.iter_dialogs():
+                    async for dialog in userbot.get_dialogs(limit=300):
                         if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
                             chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
-                except Exception as e:
-                    logger.error(f"Method C (iter_dialogs) error: {e}")
+                except:
+                    pass
 
             dialog_count = len(chat_ids_to_target)
-            logger.info(f"Auto-discovery finished. Total unique target groups found: {dialog_count}")
+            logger.info(f"Deep scan complete. Target groups found: {dialog_count}")
 
             if dialog_count == 0:
-                logger.warning("All automated fetching methods returned 0 groups!")
                 if log_msg:
                     try:
                         await log_msg.edit_text(
-                            "⚠️ **Warning: 0 Groups Found Automatically!**\n\n"
-                            "Telegram API restricted dialog caching for this session. "
-                            "**Quick Fix:** Please open your Telegram app on this account, send a text message in any one of your groups, and restart the ads."
+                            "⏳ **Deep Scanner Active...**\n\n"
+                            "Bot background listener is running and listening for incoming group chats. "
+                            "As soon as any message arrives in any of your joined groups, the bot will instantly capture and list them here."
                         )
                     except:
                         pass
-                await asyncio.sleep(60)
+                await asyncio.sleep(20)
                 continue
 
             for chat_id, chat_title in chat_ids_to_target:
