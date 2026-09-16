@@ -275,7 +275,7 @@ async def unified_text_handler(client, message: Message):
             await accounts_col.insert_one({"user_id": user_id, "phone": phone, "session_string": session_string})
             await userbot.disconnect()
             del temp_sessions[user_id]
-            await message.reply("✅ Account Added Successfully!\n\n*(Note: If groups still show 0, please delete this account from 'Manage Accounts' and re-add it).*")
+            await message.reply("✅ Account Added Successfully!")
             await show_dashboard(message)
         except SessionPasswordNeeded:
             state["step"] = "waiting_password"
@@ -366,7 +366,7 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.edit_text("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with Direct Chat Iteration Fallback ---
+# --- Run & Stop Ads Worker with Ultimate Force Sync Strategy ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
@@ -374,7 +374,7 @@ async def ad_worker(bot_client, user_id):
         
         log_msg = await bot_client.send_message(
             user_id, 
-            "🚀 **Ad Worker Initialized!**\nConnecting userbot and fetching chats..."
+            "🚀 **Ad Worker Initialized!**\nConnecting userbot and forcing chat sync..."
         )
         
         account = await accounts_col.find_one({"user_id": user_id})
@@ -391,9 +391,32 @@ async def ad_worker(bot_client, user_id):
         logger.info(f"Userbot session started successfully for user {user_id}")
         
         if log_msg:
-            await log_msg.edit_text("✅ **Userbot Connected!**\nSyncing groups list...")
+            await log_msg.edit_text("✅ **Userbot Connected!**\nPulling all joined groups from Telegram...")
 
-        await asyncio.sleep(6) # Sync delay
+        # Force sync by iterating through userbot's common peer channels / getting chats
+        chat_ids_to_target = set()
+        
+        try:
+            # Force Telegram to load full dialog history cache
+            async for dialog in userbot.get_dialogs(limit=300):
+                if dialog.chat:
+                    if dialog.chat.type in ["group", "supergroup"]:
+                        chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
+        except Exception as e:
+            logger.error(f"Error fetching dialogs during warm-up: {e}")
+
+        # Fallback secondary method if dialogs return empty: fetch via get_chats wrapper if available or iteration
+        if not chat_ids_to_target:
+            try:
+                async for chat in userbot.get_chat_history("me", limit=10): # dummy touch to warm up connection
+                    pass
+                async for dialog in userbot.get_dialogs(limit=500):
+                    if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
+                        chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
+            except Exception as ex:
+                logger.error(f"Secondary sync error: {ex}")
+
+        logger.info(f"Warmed up and found {len(chat_ids_to_target)} groups for user {user_id}")
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -413,34 +436,21 @@ async def ad_worker(bot_client, user_id):
                     await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
                 break
                 
-            logger.info(f"Fetching dialogs for userbot {user_id}...")
-            dialog_count = 0
             sent_count = 0
             failed_count = 0
             fetched_groups_info = ""
             
-            chat_ids_to_target = set()
-            
-            # Method 1: Get Dialogs
-            try:
-                async for dialog in userbot.get_dialogs():
-                    if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
-                        chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
-            except Exception as e:
-                logger.error(f"Error in get_dialogs: {e}")
-
-            # Method 2: Fallback to direct client.get_chats() or iterative check if dialogs return empty
+            # Refresh groups list dynamically every cycle incase it was empty before
             if not chat_ids_to_target:
-                logger.warning("Dialogs returned 0, attempting fallback via get_chat history/iterators...")
                 try:
-                    async for dialog in userbot.get_dialogs(limit=200):
+                    async for dialog in userbot.get_dialogs(limit=300):
                         if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
                             chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
-                except Exception as ex:
-                    logger.error(f"Fallback fetch error: {ex}")
+                except:
+                    pass
 
             dialog_count = len(chat_ids_to_target)
-            logger.info(f"Total unique groups targeted for user {user_id}: {dialog_count}")
+            logger.info(f"Starting ad cycle. Target groups: {dialog_count}")
 
             for chat_id, chat_title in chat_ids_to_target:
                 try:
@@ -475,7 +485,7 @@ async def ad_worker(bot_client, user_id):
                 f"• Successfully Sent: `{sent_count}`\n"
                 f"• Failed / Restricted: `{failed_count}`\n\n"
                 f"📋 **Groups Status Details:**\n"
-                f"{fetched_groups_info[:3000] if fetched_groups_info else '⚠️ Still 0 groups found! TIP: Please remove your account from bot and re-add it using /start.'}"
+                f"{fetched_groups_info[:3000] if fetched_groups_info else '⚠️ Groups list is empty. Please open Telegram app on your userbot account and send a message in those groups once to sync them.'}"
             )
             
             if log_msg:
@@ -585,7 +595,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         await callback.message.edit_text("Send the channel username or private channel ID (e.g., `@channel` or `-100xxxxxxxxxx`):")
     elif data == "fsub_rem":
         admin_states[user_id] = "wait_rem_fsub"
-        await callback.image_text = "Send the channel username or ID to remove from Force Sub:"
         await callback.message.edit_text("Send the channel username or ID to remove from Force Sub:")
     elif data == "fsub_list":
         subs = await forcesub_col.find().to_list(length=100)
@@ -599,8 +608,8 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
     elif data == "adm_stats":
         total_users = await users_col.count_documents({})
         total_accs = await accounts_col.count_documents({})
-        text = f"📊 **Bot Statistics:**\n\nTotal Users: `{total_users}`\nHosted Accounts: `{total_accs}`"
-        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙Back", callback_data="back_admin")]]))
+        text = f"📊 **Bot Statistics:**\n\nTotal Users: `{total_users}`\nHostedAccounts: `{total_accs}`"
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
     elif data == "adm_set":
         await callback.message.edit_text("⚙️ **Global Settings**\nAll system parameters are operating normally.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
     elif data == "back_admin":
