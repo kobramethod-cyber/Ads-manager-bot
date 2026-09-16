@@ -372,10 +372,9 @@ async def ad_worker(bot_client, user_id):
     try:
         logger.info(f"Ad worker started for user {user_id}")
         
-        # Send initial log status message to user's private chat
         log_msg = await bot_client.send_message(
             user_id, 
-            "🚀 **Ad Worker Initialized!**\nConnecting userbot and fetching groups..."
+            "🚀 **Ad Worker Initialized!**\nConnecting userbot and syncing data..."
         )
         
         account = await accounts_col.find_one({"user_id": user_id})
@@ -392,7 +391,10 @@ async def ad_worker(bot_client, user_id):
         logger.info(f"Userbot session started successfully for user {user_id}")
         
         if log_msg:
-            await log_msg.edit_text("✅ **Userbot Connected Successfully!**\nSyncing dialogs and fetching groups...")
+            await log_msg.edit_text("✅ **Userbot Connected!**\nWaiting for Telegram to sync chats...")
+
+        # 5 seconds extra sleep to let Telegram background sync complete the dialogs list
+        await asyncio.sleep(5)
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -412,23 +414,22 @@ async def ad_worker(bot_client, user_id):
                     await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
                 break
                 
-            logger.info(f"Fetching dialogs for userbot {user_id} to post ads...")
+            logger.info(f"Fetching dialogs for userbot {user_id}...")
             dialog_count = 0
             sent_count = 0
             failed_count = 0
             fetched_groups_info = ""
             
-            # Retry mechanism to ensure dialogs are fetched properly (Pyrogram sometimes returns empty on first call)
             dialogs_list = []
-            for attempt in range(3):
+            for attempt in range(5):
                 try:
                     async for dialog in userbot.get_dialogs():
                         dialogs_list.append(dialog)
-                    if dialogs_list:
+                    if len(dialogs_list) > 0:
                         break
                 except Exception as ex:
                     logger.warning(f"Attempt {attempt+1} failed to fetch dialogs: {ex}")
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
             
             logger.info(f"Total dialogs collected for user {user_id}: {len(dialogs_list)}")
 
@@ -454,11 +455,9 @@ async def ad_worker(bot_client, user_id):
                         try:
                             await userbot.send_message(chat_id, ad["text"])
                             sent_count += 1
-                            logger.info(f"Successfully sent ad after FloodWait to: {chat_title}")
                             fetched_groups_info += f"\n• {chat_title} ➔ Sent (After Wait) ✅"
                         except Exception as e:
                             failed_count += 1
-                            logger.error(f"Failed to send ad after FloodWait to {chat_id}: {e}")
                             fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
                     except Exception as e:
                         failed_count += 1
@@ -471,7 +470,7 @@ async def ad_worker(bot_client, user_id):
                 f"• Successfully Sent: `{sent_count}`\n"
                 f"• Failed / Restricted: `{failed_count}`\n\n"
                 f"📋 **Groups Status Details:**\n"
-                f"{fetched_groups_info[:3000] if fetched_groups_info else 'No groups found in dialogs!'}"
+                f"{fetched_groups_info[:3000] if fetched_groups_info else '⚠️ No groups found! Make sure your userbot has joined those 16 groups.'}"
             )
             
             if log_msg:
@@ -480,13 +479,10 @@ async def ad_worker(bot_client, user_id):
                 except Exception as ex:
                     logger.error(f"Failed to update log message: {ex}")
             
-            logger.info(f"Ad posting cycle finished for user {user_id}. Found {dialog_count} groups, sent to {sent_count} groups.")
-            
             interval_mins = settings.get("interval", 5)
-            logger.info(f"Ad worker sleeping for {interval_mins} minutes...")
             if log_msg:
                 try:
-                    await bot_client.send_message(user_id, f"💤 Cycle completed. Next round will start after `{interval_mins}` minutes.")
+                    await bot_client.send_message(user_id, f"💤 Cycle completed. Next round in `{interval_mins}` minutes.")
                 except:
                     pass
             
@@ -601,7 +597,7 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
     elif data == "adm_set":
         await callback.message.edit_text("⚙️ **Global Settings**\nAll system parameters are operating normally.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
-    elif data == "back_admin":
+    elif data == "adm_back" or data == "back_admin":
         await admin_panel_handler(client, callback.message)
 
 # --- Main Entry Point ---
