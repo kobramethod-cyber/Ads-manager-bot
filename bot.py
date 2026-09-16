@@ -252,7 +252,7 @@ async def unified_text_handler(client, message: Message):
         phone = message.text.strip()
         state["phone"] = phone
         try:
-            userbot = Client(f"session_{user_id}", api_id=API_ID, api_hash=API_HASH, in_memory=True)
+            userbot = Client(f"temp_session_{user_id}", api_id=API_ID, api_hash=API_HASH, in_memory=True)
             await userbot.connect()
             sent_code = await userbot.send_code(phone)
             state["userbot"] = userbot
@@ -275,7 +275,7 @@ async def unified_text_handler(client, message: Message):
             await accounts_col.insert_one({"user_id": user_id, "phone": phone, "session_string": session_string})
             await userbot.disconnect()
             del temp_sessions[user_id]
-            await message.reply("✅ Account Added Successfully!")
+            await message.reply("✅ Account Added Successfully!\n\n*(Note: If groups still show 0, please delete this account from 'Manage Accounts' and re-add it).*")
             await show_dashboard(message)
         except SessionPasswordNeeded:
             state["step"] = "waiting_password"
@@ -366,7 +366,7 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.edit_text("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with Fixed Group Fetching & Live Logs ---
+# --- Run & Stop Ads Worker with Direct Chat Iteration Fallback ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
@@ -374,7 +374,7 @@ async def ad_worker(bot_client, user_id):
         
         log_msg = await bot_client.send_message(
             user_id, 
-            "🚀 **Ad Worker Initialized!**\nConnecting userbot and syncing data..."
+            "🚀 **Ad Worker Initialized!**\nConnecting userbot and fetching chats..."
         )
         
         account = await accounts_col.find_one({"user_id": user_id})
@@ -391,10 +391,9 @@ async def ad_worker(bot_client, user_id):
         logger.info(f"Userbot session started successfully for user {user_id}")
         
         if log_msg:
-            await log_msg.edit_text("✅ **Userbot Connected!**\nWaiting for Telegram to sync chats...")
+            await log_msg.edit_text("✅ **Userbot Connected!**\nSyncing groups list...")
 
-        # 5 seconds extra sleep to let Telegram background sync complete the dialogs list
-        await asyncio.sleep(5)
+        await asyncio.sleep(6) # Sync delay
 
         @userbot.on_message(filters.private & ~filters.me)
         async def handle_auto_reply(client, message):
@@ -420,49 +419,55 @@ async def ad_worker(bot_client, user_id):
             failed_count = 0
             fetched_groups_info = ""
             
-            dialogs_list = []
-            for attempt in range(5):
-                try:
-                    async for dialog in userbot.get_dialogs():
-                        dialogs_list.append(dialog)
-                    if len(dialogs_list) > 0:
-                        break
-                except Exception as ex:
-                    logger.warning(f"Attempt {attempt+1} failed to fetch dialogs: {ex}")
-                await asyncio.sleep(3)
+            chat_ids_to_target = set()
             
-            logger.info(f"Total dialogs collected for user {user_id}: {len(dialogs_list)}")
+            # Method 1: Get Dialogs
+            try:
+                async for dialog in userbot.get_dialogs():
+                    if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
+                        chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
+            except Exception as e:
+                logger.error(f"Error in get_dialogs: {e}")
 
-            for dialog in dialogs_list:
-                if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
-                    dialog_count += 1
-                    chat_title = dialog.chat.title or "Unnamed Group"
-                    chat_id = dialog.chat.id
+            # Method 2: Fallback to direct client.get_chats() or iterative check if dialogs return empty
+            if not chat_ids_to_target:
+                logger.warning("Dialogs returned 0, attempting fallback via get_chat history/iterators...")
+                try:
+                    async for dialog in userbot.get_dialogs(limit=200):
+                        if dialog.chat and dialog.chat.type in ["group", "supergroup"]:
+                            chat_ids_to_target.add((dialog.chat.id, dialog.chat.title or "Unnamed Group"))
+                except Exception as ex:
+                    logger.error(f"Fallback fetch error: {ex}")
+
+            dialog_count = len(chat_ids_to_target)
+            logger.info(f"Total unique groups targeted for user {user_id}: {dialog_count}")
+
+            for chat_id, chat_title in chat_ids_to_target:
+                try:
+                    await userbot.send_message(chat_id, ad["text"])
+                    sent_count += 1
+                    logger.info(f"Successfully sent ad to group: {chat_title} ({chat_id})")
+                    fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
+                    await asyncio.sleep(3)
+                except FloodWait as fw:
+                    logger.warning(f"FloodWait hit! Sleeping for {fw.value} seconds.")
+                    if log_msg:
+                        try:
+                            await log_msg.edit_text(f"⏳ **FloodWait Notice:** Sleeping for {fw.value}s...")
+                        except:
+                            pass
+                    await asyncio.sleep(fw.value)
                     try:
                         await userbot.send_message(chat_id, ad["text"])
                         sent_count += 1
-                        logger.info(f"Successfully sent ad to group: {chat_title} ({chat_id})")
-                        fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
-                        await asyncio.sleep(3)
-                    except FloodWait as fw:
-                        logger.warning(f"FloodWait hit! Sleeping for {fw.value} seconds.")
-                        if log_msg:
-                            try:
-                                await log_msg.edit_text(f"⏳ **FloodWait Notice:** Sleeping for {fw.value}s...")
-                            except:
-                                pass
-                        await asyncio.sleep(fw.value)
-                        try:
-                            await userbot.send_message(chat_id, ad["text"])
-                            sent_count += 1
-                            fetched_groups_info += f"\n• {chat_title} ➔ Sent (After Wait) ✅"
-                        except Exception as e:
-                            failed_count += 1
-                            fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+                        fetched_groups_info += f"\n• {chat_title} ➔ Sent (After Wait) ✅"
                     except Exception as e:
                         failed_count += 1
-                        logger.error(f"Could not send ad to group {chat_title} ({chat_id}): {e}")
                         fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"Could not send ad to group {chat_title} ({chat_id}): {e}")
+                    fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
             
             summary_text = (
                 f"📊 **Ad Cycle Report:**\n\n"
@@ -470,7 +475,7 @@ async def ad_worker(bot_client, user_id):
                 f"• Successfully Sent: `{sent_count}`\n"
                 f"• Failed / Restricted: `{failed_count}`\n\n"
                 f"📋 **Groups Status Details:**\n"
-                f"{fetched_groups_info[:3000] if fetched_groups_info else '⚠️ No groups found! Make sure your userbot has joined those 16 groups.'}"
+                f"{fetched_groups_info[:3000] if fetched_groups_info else '⚠️ Still 0 groups found! TIP: Please remove your account from bot and re-add it using /start.'}"
             )
             
             if log_msg:
@@ -580,6 +585,7 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         await callback.message.edit_text("Send the channel username or private channel ID (e.g., `@channel` or `-100xxxxxxxxxx`):")
     elif data == "fsub_rem":
         admin_states[user_id] = "wait_rem_fsub"
+        await callback.image_text = "Send the channel username or ID to remove from Force Sub:"
         await callback.message.edit_text("Send the channel username or ID to remove from Force Sub:")
     elif data == "fsub_list":
         subs = await forcesub_col.find().to_list(length=100)
@@ -594,10 +600,10 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         total_users = await users_col.count_documents({})
         total_accs = await accounts_col.count_documents({})
         text = f"📊 **Bot Statistics:**\n\nTotal Users: `{total_users}`\nHosted Accounts: `{total_accs}`"
-        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙Back", callback_data="back_admin")]]))
     elif data == "adm_set":
         await callback.message.edit_text("⚙️ **Global Settings**\nAll system parameters are operating normally.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_admin")]]))
-    elif data == "adm_back" or data == "back_admin":
+    elif data == "back_admin":
         await admin_panel_handler(client, callback.message)
 
 # --- Main Entry Point ---
