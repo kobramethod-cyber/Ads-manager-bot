@@ -34,7 +34,7 @@ PRIMARY_ADMIN_ID = 1936430807
 
 PORT = int(os.environ.get("PORT", "8080"))
 
-# Initialize Flask for Render Uptime Robot Keep-Alive
+# Initialize Flask for Uptime
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
@@ -62,8 +62,16 @@ active_workers = {}
 temp_sessions = {}
 admin_states = {}
 
-# Default Dashboard Image (Agar Database me na mile to)
+# Default Values
 DEFAULT_DASHBOARD_PIC = "https://telegra.ph/file/0b93892809e072d627c54.jpg"
+DEFAULT_DASHBOARD_TEXT = (
+    "─── **Powered by @adsmanage13_bot** ───\n\n"
+    "• **Hosted Accounts:** `{acc_count}/20`\n"
+    "• **Service:** `{service_status}`\n"
+    "• **Advertisement status:** `{ad_status}`\n"
+    "• **Interval:** `{interval} minutes`\n"
+    "• **Current plan:** `Free`"
+)
 
 # --- Helper Functions ---
 async def is_admin(user_id: int):
@@ -92,11 +100,11 @@ async def check_forcesub(client, user_id):
     except Exception:
         return []
 
-async def get_dashboard_pic():
+async def get_dashboard_config():
     config = await settings_col.find_one({"type": "bot_config"})
-    if config and config.get("dashboard_pic"):
-        return config["dashboard_pic"]
-    return DEFAULT_DASHBOARD_PIC
+    pic = config.get("dashboard_pic", DEFAULT_DASHBOARD_PIC) if config else DEFAULT_DASHBOARD_PIC
+    text_template = config.get("dashboard_text", DEFAULT_DASHBOARD_TEXT) if config else DEFAULT_DASHBOARD_TEXT
+    return pic, text_template
 
 # --- /start Command & Main Dashboard ---
 @bot.on_message(filters.command("start") & filters.private)
@@ -134,16 +142,18 @@ async def show_dashboard(message_or_query, edit=False):
     service_status = "Set ✅" if ad_data else "Not set ❌"
     ad_status = settings.get("ad_status", "Stopped ⛔")
     interval = settings.get("interval", 5)
-    dash_pic = await get_dashboard_pic()
+    
+    dash_pic, text_template = await get_dashboard_config()
 
-    text = (
-        "─── **Powered by @adsmanage13_bot** ───\n\n"
-        f"• **Hosted Accounts:** `{acc_count}/20`\n"
-        f"• **Service:** `{service_status}`\n"
-        f"• **Advertisement status:** `{ad_status}`\n"
-        f"• **Interval:** `{interval} minutes`\n"
-        f"• **Current plan:** `Free`"
-    )
+    try:
+        text = text_template.format(
+            acc_count=acc_count,
+            service_status=service_status,
+            ad_status=ad_status,
+            interval=interval
+        )
+    except Exception:
+        text = text_template
 
     btn_layout = [
         [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
@@ -249,6 +259,15 @@ async def unified_text_handler(client, message: Message):
                 await message.reply("✅ **Dashboard Photo Updated Successfully!**")
             else:
                 await message.reply("❌ Invalid input! Send a photo or an image URL.")
+            return
+
+        elif state == "wait_dash_text":
+            new_text = message.text
+            if new_text:
+                await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_text": new_text}}, upsert=True)
+                await message.reply("✅ **Dashboard Text Updated Successfully!**")
+            else:
+                await message.reply("❌ Text cannot be empty.")
             return
 
         elif state == "wait_add_admin":
@@ -432,7 +451,7 @@ async def ad_worker(bot_client, user_id):
         userbot = Client(f"worker_{user_id}", session_string=account["session_string"], api_id=API_ID, api_hash=API_HASH, in_memory=True)
         await userbot.start()
 
-        # Check if bio is already updated for first time
+        # Update Bio once
         user_db_data = await users_col.find_one({"user_id": user_id})
         if user_db_data and not user_db_data.get("bio_set", False):
             try:
@@ -568,7 +587,7 @@ async def open_admin_panel_cb(client, callback: CallbackQuery):
         return
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Set Dashboard Photo", callback_data="adm_set_pic")],
+        [InlineKeyboardButton("🖼 Set Photo", callback_data="adm_set_pic"), InlineKeyboardButton("📝 Edit Text", callback_data="adm_set_text")],
         [InlineKeyboardButton("👑 Add Admin", callback_data="adm_add"), InlineKeyboardButton("❌ Remove Admin", callback_data="adm_rem")],
         [InlineKeyboardButton("📋 Admin List", callback_data="adm_list"), InlineKeyboardButton("🔒 Add Force Sub", callback_data="fsub_add")],
         [InlineKeyboardButton("🔓 Remove Force Sub", callback_data="fsub_rem"), InlineKeyboardButton("📋 Force Sub List", callback_data="fsub_list")],
@@ -589,6 +608,17 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
     if data == "adm_set_pic":
         admin_states[user_id] = "wait_dash_pic"
         await callback.message.reply("Send photo OR direct photo URL to set as dashboard image:")
+    elif data == "adm_set_text":
+        admin_states[user_id] = "wait_dash_text"
+        instruction = (
+            "Send the new text for Dashboard.\n\n"
+            "You can use these placeholders to insert dynamic stats:\n"
+            "• `{acc_count}` - Number of hosted accounts\n"
+            "• `{service_status}` - Status of ad (Set/Not set)\n"
+            "• `{ad_status}` - Ad running status\n"
+            "• `{interval}` - Interval in minutes"
+        )
+        await callback.message.reply(instruction)
     elif data == "adm_add":
         admin_states[user_id] = "wait_add_admin"
         await callback.message.reply("Send the Telegram User ID of the new admin:")
