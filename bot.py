@@ -133,6 +133,7 @@ async def start_handler(client, message: Message):
         custom_button_text = w_data.get("btn_text", "🚀 Start Using Bot") if w_data else "🚀 Start Using Bot"
         custom_button_url = w_data.get("btn_url") if w_data else None
 
+        # Custom and Continue buttons in separate rows
         buttons = []
         if custom_button_url:
             buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
@@ -180,6 +181,7 @@ async def welcome_continue_cb(client, callback: CallbackQuery):
 
     await show_dashboard(callback, edit=False)
 
+# --- Dashboard View ---
 async def show_dashboard(message_or_query, edit=False):
     if isinstance(message_or_query, CallbackQuery):
         user_id = message_or_query.from_user.id
@@ -208,11 +210,14 @@ async def show_dashboard(message_or_query, edit=False):
     except Exception:
         text = text_template
 
+    # Updated Layout with Welcome & Auto-Reply in separate rows
     btn_layout = [
         [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
-        [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval"), InlineKeyboardButton("👋 Set Welcome", callback_data="set_welcome")],
+        [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval")],
+        [InlineKeyboardButton("👋 Set Welcome Message", callback_data="set_welcome")],
+        [InlineKeyboardButton("🤖 Auto Reply Settings", callback_data="auto_reply")],
         [InlineKeyboardButton("▶️ Run Ads", callback_data="run_ads"), InlineKeyboardButton("⏹ Stop Ads", callback_data="stop_ads")],
-        [InlineKeyboardButton("🤖 Auto Reply", callback_data="auto_reply"), InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
+        [InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
     ]
 
     if await is_admin(user_id):
@@ -291,16 +296,16 @@ async def add_account_cb(client, callback: CallbackQuery):
     temp_sessions[user_id] = {"step": "waiting_phone"}
     await callback.message.reply("Send your phone number with country code.\nExample: `+919876543210`")
 
-# --- 👋 Set Welcome Setup ---
+# --- Set Welcome Setup ---
 @bot.on_callback_query(filters.regex("set_welcome"))
 async def set_welcome_cb(client, callback: CallbackQuery):
     user_id = callback.from_user.id
     temp_sessions[user_id] = {"step": "waiting_welcome_msg"}
     instruction = (
-        "👋 **Set Welcome Message**\n\n"
-        "Send welcome text, photo, or video.\n"
-        "You can also attach button link in format:\n"
-        "`Text | Button Name | https://link.com`"
+        "👋 **Set Custom Welcome Message**\n\n"
+        "Send welcome **text**, **photo**, or **video**.\n\n"
+        "💡 **To add a button link, use format:**\n"
+        "`Text Message | Button Name | https://yourlink.com`"
     )
     await callback.message.reply(instruction)
 
@@ -390,7 +395,7 @@ async def unified_text_handler(client, message: Message):
             await message.reply("❌ Invalid number! Please send seconds as digits (e.g. `300`).")
         return
 
-    # Set Welcome Input Handler
+    # Set Welcome Input Handler (Text/Photo/Video + Custom Link Support)
     if state["step"] == "waiting_welcome_msg":
         raw_text = message.caption or message.text or ""
         media_id = None
@@ -503,7 +508,7 @@ async def set_ad_cb(client, callback: CallbackQuery):
     temp_sessions[user_id] = {"step": "waiting_ad_text"}
     await callback.message.reply("Send advertisement text:")
 
-# --- Interval & Delay Menu with Custom Button ---
+# --- Interval & Delay Menu ---
 @bot.on_callback_query(filters.regex("set_interval"))
 async def set_interval_cb(client, callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -661,7 +666,7 @@ async def ad_worker(bot_client, user_id):
                     failed_count += 1
                     fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
 
-                # Immediately update log screen in real-time
+                # Real-time log message update
                 live_status_text = (
                     f"📢 **Live Broadcasting In Progress...**\n\n"
                     f"• Total Target Groups: `{dialog_count}`\n"
