@@ -56,6 +56,7 @@ ads_col = db["ads"]
 settings_col = db["settings"]
 forcesub_col = db["forcesub"]
 admins_col = db["admins"]
+welcome_col = db["welcome_msg"]
 
 # Active running tasks dictionary
 active_workers = {}
@@ -69,7 +70,7 @@ DEFAULT_DASHBOARD_TEXT = (
     "• **Hosted Accounts:** `{acc_count}/20`\n"
     "• **Service:** `{service_status}`\n"
     "• **Advertisement status:** `{ad_status}`\n"
-    "• **Interval:** `{interval} minutes`\n"
+    "• **Interval:** `{interval} seconds`\n"
     "• **Current plan:** `Free`"
 )
 
@@ -106,15 +107,50 @@ async def get_dashboard_config():
     text_template = config.get("dashboard_text", DEFAULT_DASHBOARD_TEXT) if config else DEFAULT_DASHBOARD_TEXT
     return pic, text_template
 
-# --- /start Command & Main Dashboard ---
+# --- /start Command & Welcome Feature ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name or "User"
     
     user_exists = await users_col.find_one({"user_id": user_id})
+    
+    # Custom Welcome for First Time Users
     if not user_exists:
         await users_col.insert_one({"user_id": user_id, "joined_date": message.date, "bio_set": False})
         
+        w_data = await welcome_col.find_one({"user_id": user_id}) or await welcome_col.find_one({"type": "default"})
+        
+        default_welcome_text = (
+            f"👋 **Hello {first_name}! Welcome to Ads Manager Bot.**\n\n"
+            "🤖 Is bot ke zariye aap apne Telegram accounts se automatic ads and messages groups me post kar sakte hain.\n\n"
+            "👇 Click below button to start:"
+        )
+        
+        welcome_text = w_data.get("text", default_welcome_text) if w_data else default_welcome_text
+        media_id = w_data.get("media_id") if w_data else None
+        media_type = w_data.get("media_type") if w_data else None
+        custom_button_text = w_data.get("btn_text", "🚀 Start Using Bot") if w_data else "🚀 Start Using Bot"
+        custom_button_url = w_data.get("btn_url") if w_data else None
+
+        buttons = []
+        if custom_button_url:
+            buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
+            buttons.append([InlineKeyboardButton("🚀 Go to Dashboard", callback_data="welcome_continue")])
+        else:
+            buttons.append([InlineKeyboardButton(custom_button_text, callback_data="welcome_continue")])
+
+        keyboard = InlineKeyboardMarkup(buttons)
+
+        if media_id and media_type == "photo":
+            await message.reply_photo(photo=media_id, caption=welcome_text, reply_markup=keyboard)
+        elif media_id and media_type == "video":
+            await message.reply_video(video=media_id, caption=welcome_text, reply_markup=keyboard)
+        else:
+            await message.reply_text(welcome_text, reply_markup=keyboard)
+        return
+
+    # Check Force Sub for existing users
     not_joined = await check_forcesub(client, user_id)
     if not_joined and not await is_admin(user_id):
         buttons = []
@@ -127,6 +163,23 @@ async def start_handler(client, message: Message):
 
     await show_dashboard(message)
 
+# Welcome Button Callback Handler
+@bot.on_callback_query(filters.regex("^welcome_continue$"))
+async def welcome_continue_cb(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    
+    not_joined = await check_forcesub(client, user_id)
+    if not_joined and not await is_admin(user_id):
+        buttons = []
+        for ch in not_joined:
+            clean_ch = ch.replace('@','').replace('-100','')
+            buttons.append([InlineKeyboardButton("Join Channel", url=f"https://t.me/{clean_ch}")])
+        buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_forcesub")])
+        await callback.message.reply("⚠️ **Please join our update channels first to use this bot!**", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    await show_dashboard(callback, edit=False)
+
 async def show_dashboard(message_or_query, edit=False):
     if isinstance(message_or_query, CallbackQuery):
         user_id = message_or_query.from_user.id
@@ -137,11 +190,11 @@ async def show_dashboard(message_or_query, edit=False):
 
     acc_count = await accounts_col.count_documents({"user_id": user_id})
     ad_data = await ads_col.find_one({"user_id": user_id})
-    settings = await settings_col.find_one({"user_id": user_id}) or {"interval": 5, "ad_status": "Stopped ⛔", "auto_reply": False}
+    settings = await settings_col.find_one({"user_id": user_id}) or {"interval": 300, "ad_status": "Stopped ⛔", "auto_reply": False}
     
     service_status = "Set ✅" if ad_data else "Not set ❌"
     ad_status = settings.get("ad_status", "Stopped ⛔")
-    interval = settings.get("interval", 5)
+    interval = settings.get("interval", 300)
     
     dash_pic, text_template = await get_dashboard_config()
 
@@ -157,9 +210,9 @@ async def show_dashboard(message_or_query, edit=False):
 
     btn_layout = [
         [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
-        [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval"), InlineKeyboardButton("▶️ Run Ads", callback_data="run_ads")],
-        [InlineKeyboardButton("⏹ Stop Ads", callback_data="stop_ads"), InlineKeyboardButton("🤖 Auto Reply", callback_data="auto_reply")],
-        [InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
+        [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval"), InlineKeyboardButton("👋 Set Welcome", callback_data="set_welcome")],
+        [InlineKeyboardButton("▶️ Run Ads", callback_data="run_ads"), InlineKeyboardButton("⏹ Stop Ads", callback_data="stop_ads")],
+        [InlineKeyboardButton("🤖 Auto Reply", callback_data="auto_reply"), InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
     ]
 
     if await is_admin(user_id):
@@ -190,7 +243,7 @@ async def check_forcesub_cb(client, callback: CallbackQuery):
         await callback.answer("✅ Verified successfully!")
         await show_dashboard(callback, edit=True)
 
-# --- Manage & Remove Accounts Flow ---
+# --- Manage Accounts Flow ---
 @bot.on_callback_query(filters.regex("manage_accounts"))
 async def manage_accounts_cb(client, callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -238,36 +291,42 @@ async def add_account_cb(client, callback: CallbackQuery):
     temp_sessions[user_id] = {"step": "waiting_phone"}
     await callback.message.reply("Send your phone number with country code.\nExample: `+919876543210`")
 
-# Unified Text Message Router
-@bot.on_message(filters.private & (filters.text | filters.photo))
+# --- 👋 Set Welcome Setup ---
+@bot.on_callback_query(filters.regex("set_welcome"))
+async def set_welcome_cb(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    temp_sessions[user_id] = {"step": "waiting_welcome_msg"}
+    instruction = (
+        "👋 **Set Welcome Message**\n\n"
+        "Send welcome text, photo, or video.\n"
+        "You can also attach button link in format:\n"
+        "`Text | Button Name | https://link.com`"
+    )
+    await callback.message.reply(instruction)
+
+# Unified Text/Media Router
+@bot.on_message(filters.private & (filters.text | filters.photo | filters.video))
 async def unified_text_handler(client, message: Message):
     user_id = message.from_user.id
     
+    # Admin States Handling
     if user_id in admin_states:
         state = admin_states[user_id]
         del admin_states[user_id]
         
         if state == "wait_dash_pic":
-            pic_media = None
-            if message.photo:
-                pic_media = message.photo.file_id
-            elif message.text:
-                pic_media = message.text.strip()
-            
+            pic_media = message.photo.file_id if message.photo else (message.text.strip() if message.text else None)
             if pic_media:
                 await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_pic": pic_media}}, upsert=True)
                 await message.reply("✅ **Dashboard Photo Updated Successfully!**")
             else:
-                await message.reply("❌ Invalid input! Send a photo or an image URL.")
+                await message.reply("❌ Invalid input!")
             return
 
         elif state == "wait_dash_text":
-            new_text = message.text
-            if new_text:
-                await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_text": new_text}}, upsert=True)
+            if message.text:
+                await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_text": message.text}}, upsert=True)
                 await message.reply("✅ **Dashboard Text Updated Successfully!**")
-            else:
-                await message.reply("❌ Text cannot be empty.")
             return
 
         elif state == "wait_add_admin":
@@ -316,6 +375,62 @@ async def unified_text_handler(client, message: Message):
     
     state = temp_sessions[user_id]
     
+    # Custom Interval Input Flow
+    if state["step"] == "waiting_custom_interval":
+        try:
+            seconds = int(message.text.strip())
+            if seconds < 10:
+                await message.reply("⚠️ Interval must be at least 10 seconds!")
+                return
+            await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": seconds}}, upsert=True)
+            del temp_sessions[user_id]
+            await message.reply(f"✅ **Interval updated to `{seconds}` seconds!**")
+            await show_dashboard(message)
+        except ValueError:
+            await message.reply("❌ Invalid number! Please send seconds as digits (e.g. `300`).")
+        return
+
+    # Set Welcome Input Handler
+    if state["step"] == "waiting_welcome_msg":
+        raw_text = message.caption or message.text or ""
+        media_id = None
+        media_type = None
+        
+        if message.photo:
+            media_id = message.photo.file_id
+            media_type = "photo"
+        elif message.video:
+            media_id = message.video.file_id
+            media_type = "video"
+
+        btn_text, btn_url = None, None
+        if "|" in raw_text:
+            parts = [p.strip() for p in raw_text.split("|")]
+            w_text = parts[0]
+            if len(parts) >= 3:
+                btn_text = parts[1]
+                btn_url = parts[2]
+        else:
+            w_text = raw_text
+
+        await welcome_col.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "user_id": user_id,
+                "text": w_text,
+                "media_id": media_id,
+                "media_type": media_type,
+                "btn_text": btn_text,
+                "btn_url": btn_url
+            }},
+            upsert=True
+        )
+        del temp_sessions[user_id]
+        await message.reply("✅ **Welcome Message Saved Successfully!**")
+        await show_dashboard(message)
+        return
+
+    # Add Account Steps
     if state["step"] == "waiting_phone":
         phone = message.text.strip()
         state["phone"] = phone
@@ -388,23 +503,49 @@ async def set_ad_cb(client, callback: CallbackQuery):
     temp_sessions[user_id] = {"step": "waiting_ad_text"}
     await callback.message.reply("Send advertisement text:")
 
-# --- Interval & Delay ---
+# --- Interval & Delay Menu with Custom Button ---
 @bot.on_callback_query(filters.regex("set_interval"))
 async def set_interval_cb(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user_setting = await settings_col.find_one({"user_id": user_id})
+    current_sec = user_setting.get("interval", 300) if user_setting else 300
+
+    caption_text = (
+        "╰_╯ **SET BROADCAST CYCLE INTERVAL**\n\n"
+        f"**Current Interval:** `{current_sec} seconds`\n\n"
+        "**Recommended Intervals:**\n"
+        "• 300s - Aggressive (5 min) 🔴\n"
+        "• 600s - Safe & Balanced (10 min) 🟡\n"
+        "• 1200s - Conservative (20 min) 🟢\n\n"
+        "To set custom time interval click below or send a number (in seconds):\n\n"
+        "*(Note: using short time interval for broadcasting can get your Account on high risk.)*"
+    )
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("5 Minutes", callback_data="int_5"), InlineKeyboardButton("8 Minutes", callback_data="int_8")],
-        [InlineKeyboardButton("10 Minutes", callback_data="int_10"), InlineKeyboardButton("15 Minutes", callback_data="int_15")],
-        [InlineKeyboardButton("30 Minutes", callback_data="int_30")],
+        [InlineKeyboardButton("300s (5 Min)", callback_data="int_300"), InlineKeyboardButton("600s (10 Min)", callback_data="int_600")],
+        [InlineKeyboardButton("1200s (20 Min)", callback_data="int_1200"), InlineKeyboardButton("1800s (30 Min)", callback_data="int_1800")],
+        [InlineKeyboardButton("✏️ Custom Time", callback_data="int_custom")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
-    await callback.message.edit_caption(caption="Select Advertisement Interval:", reply_markup=keyboard)
+    
+    try:
+        await callback.message.edit_caption(caption=caption_text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.reply(caption_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex(r"^int_"))
 async def save_interval_cb(client, callback: CallbackQuery):
     user_id = callback.from_user.id
-    interval = int(callback.data.split("_")[1])
-    await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": interval}}, upsert=True)
-    await callback.answer("✅ Interval Updated!")
+    val = callback.data.split("_")[1]
+    
+    if val == "custom":
+        temp_sessions[user_id] = {"step": "waiting_custom_interval"}
+        await callback.message.reply("✏️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
+        return
+
+    interval_sec = int(val)
+    await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": interval_sec}}, upsert=True)
+    await callback.answer(f"✅ Interval set to {interval_sec} seconds!")
     await show_dashboard(callback, edit=True)
 
 # --- Auto Reply Menu ---
@@ -434,12 +575,12 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.reply("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker ---
+# --- Run & Stop Ads Worker with LIVE LOGS AFTER EACH AD ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
         logger.info(f"Ad worker started for user {user_id}")
-        log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**")
+        log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**\nPreparing campaign logs...")
         account = await accounts_col.find_one({"user_id": user_id})
         ad = await ads_col.find_one({"user_id": user_id})
         
@@ -501,42 +642,59 @@ async def ad_worker(bot_client, user_id):
                 await asyncio.sleep(20)
                 continue
 
+            # REAL-TIME LOG UPDATING AFTER EACH GROUP AD SENT
             for chat_id, chat_title in chat_ids_to_target:
                 try:
                     await userbot.send_message(chat_id, ad["text"])
                     sent_count += 1
                     fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
-                    await asyncio.sleep(3)
                 except FloodWait as fw:
                     await asyncio.sleep(fw.value)
                     try:
                         await userbot.send_message(chat_id, ad["text"])
                         sent_count += 1
                         fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
-                    except:
+                    except Exception:
                         failed_count += 1
                         fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
                 except Exception:
                     failed_count += 1
                     fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
-            
-            summary_text = (
-                f"📊 **Ad Cycle Report:**\n\n"
-                f"• Total Groups Found: `{dialog_count}`\n"
-                f"• Successfully Sent: `{sent_count}`\n"
-                f"• Failed / Restricted: `{failed_count}`\n\n"
-                f"📋 **Groups Status Details:**\n"
-                f"{fetched_groups_info[:3000]}"
+
+                # Immediately update log screen in real-time
+                live_status_text = (
+                    f"📢 **Live Broadcasting In Progress...**\n\n"
+                    f"• Total Target Groups: `{dialog_count}`\n"
+                    f"• Successfully Sent: `{sent_count}` ✅\n"
+                    f"• Failed / Restricted: `{failed_count}` ❌\n\n"
+                    f"📋 **Live Send Logs:**\n"
+                    f"{fetched_groups_info[-2000:]}"
+                )
+                if log_msg:
+                    try:
+                        await log_msg.edit_text(live_status_text)
+                    except Exception:
+                        pass
+                
+                await asyncio.sleep(3)
+
+            # End of Broadcast Cycle Log Summary
+            cycle_summary_text = (
+                f"📊 **Cycle Completed! Sleeping for Interval...**\n\n"
+                f"• Total Groups: `{dialog_count}`\n"
+                f"• Sent: `{sent_count}` ✅\n"
+                f"• Failed: `{failed_count}` ❌\n\n"
+                f"📋 **Final Logs:**\n"
+                f"{fetched_groups_info[-2000:]}"
             )
-            
             if log_msg:
                 try:
-                    await log_msg.edit_text(summary_text)
+                    await log_msg.edit_text(cycle_summary_text)
                 except Exception:
                     pass
-            
-            interval_mins = settings.get("interval", 5)
-            await asyncio.sleep(interval_mins * 60)
+
+            interval_sec = settings.get("interval", 300)
+            await asyncio.sleep(interval_sec)
             
         await userbot.stop()
     except Exception as e:
@@ -571,9 +729,30 @@ async def stop_ads_cb(client, callback: CallbackQuery):
     await callback.answer("⛔ Stopped!")
     await show_dashboard(callback, edit=True)
 
+# --- About Bot Handler ---
 @bot.on_callback_query(filters.regex("about_bot"))
 async def about_cb(client, callback: CallbackQuery):
-    await callback.message.edit_caption(caption="ℹ️ **Ads Manager Bot**\nPowered by Pyrogram.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_home")]]))
+    about_text = (
+        "🤖 **ABOUT ADS MANAGER BOT**\n\n"
+        "Welcome to the ultimate **Telegram Ads & Broadcast Manager Bot**! "
+        "Is bot ki madad se aap apne Multiple Telegram Accounts ko manage kar sakte hain "
+        "aur automated broadcasting & auto-reply features ka use kar sakte hain.\n\n"
+        "✨ **Key Features:**\n"
+        "• 📱 Multi-Account Hosting Support\n"
+        "• 📢 Automated Group Ads Broadcasting\n"
+        "• ⏱ Customizable Broadcast Intervals & Delays\n"
+        "• 👋 Custom Welcome Message & Buttons\n"
+        "• 🤖 Smart Auto Reply System\n"
+        "• 📊 Real-time Live Logs & Reports\n\n"
+        "👨‍💻 **Developer:** @PANDA_1125\n"
+        "💬 **Support & Inquiries:** Contact Developer for custom bot setups or help!\n\n"
+        "─── **Powered by @PANDA_1125** ───"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/PANDA_1125")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+    ])
+    await callback.message.edit_caption(caption=about_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex("back_home"))
 async def back_home_cb(client, callback: CallbackQuery):
@@ -616,7 +795,7 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
             "• `{acc_count}` - Number of hosted accounts\n"
             "• `{service_status}` - Status of ad (Set/Not set)\n"
             "• `{ad_status}` - Ad running status\n"
-            "• `{interval}` - Interval in minutes"
+            "• `{interval}` - Interval in seconds"
         )
         await callback.message.reply(instruction)
     elif data == "adm_add":
