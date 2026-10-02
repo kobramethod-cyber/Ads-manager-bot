@@ -497,6 +497,10 @@ async def unified_text_handler(client, message: Message):
         await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply_text": ar_text, "auto_reply": True}}, upsert=True)
         del temp_sessions[user_id]
         await message.reply("✅ Auto Reply Enabled & Message Saved!")
+        # Ensure worker is active so userbot listens to DMs immediately
+        if user_id not in active_workers or active_workers[user_id].done():
+            task = asyncio.create_task(account_worker(client, user_id))
+            active_workers[user_id] = task
         await show_dashboard(message)
 
 # --- Set Advertisement ---
@@ -527,7 +531,7 @@ async def set_interval_cb(client, callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("300s (5 Min)", callback_data="int_300"), InlineKeyboardButton("600s (10 Min)", callback_data="int_600")],
         [InlineKeyboardButton("1200s (20 Min)", callback_data="int_1200"), InlineKeyboardButton("1800s (30 Min)", callback_data="int_1800")],
-        [InlineKeyboardButton("✏️ Custom Time", callback_data="int_custom")],
+        [InlineKeyboardButton("✏️️ Custom Time", callback_data="int_custom")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
     
@@ -563,7 +567,14 @@ async def auto_reply_menu(client, callback: CallbackQuery):
 
 @bot.on_callback_query(filters.regex("ar_enable"))
 async def ar_enable_cb(client, callback: CallbackQuery):
-    await settings_col.update_one({"user_id": callback.from_user.id}, {"$set": {"auto_reply": True}}, upsert=True)
+    user_id = callback.from_user.id
+    await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply": True}}, upsert=True)
+    
+    # Start worker if not already running so userbot stays connected for auto-reply
+    if user_id not in active_workers or active_workers[user_id].done():
+        task = asyncio.create_task(account_worker(client, user_id))
+        active_workers[user_id] = task
+
     await callback.answer("✅ Auto Reply Enabled")
     await show_dashboard(callback, edit=True)
 
@@ -578,18 +589,14 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.reply("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with LIVE LOGS & AUTO-REPLY ---
-async def ad_worker(bot_client, user_id):
+# --- Robust Account Worker (Fixed Instant Stop & Auto-Reply) ---
+async def account_worker(bot_client, user_id):
     log_msg = None
+    userbot = None
     try:
-        logger.info(f"Ad worker started for user {user_id}")
-        log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**\nPreparing campaign logs...")
+        logger.info(f"Account worker started for user {user_id}")
         account = await accounts_col.find_one({"user_id": user_id})
-        ad = await ads_col.find_one({"user_id": user_id})
-        
-        if not account or not ad:
-            if log_msg:
-                await log_msg.edit_text("❌ **Error:** Account or Advertisement text missing!")
+        if not account:
             return
             
         userbot = Client(f"worker_{user_id}", session_string=account["session_string"], api_id=API_ID, api_hash=API_HASH, in_memory=True)
@@ -611,7 +618,7 @@ async def ad_worker(bot_client, user_id):
             if message.chat:
                 discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
 
-        # --- Userbot Auto-Reply / Welcome Handler for Private DMs ---
+        # --- Userbot Auto-Reply Handler for Private DMs ---
         @userbot.on_message(filters.private & ~filters.me & ~filters.bot)
         async def userbot_auto_reply(client, message):
             try:
@@ -622,15 +629,36 @@ async def ad_worker(bot_client, user_id):
                         await message.reply_text(ar_text)
             except Exception as e:
                 logger.error(f"Userbot Auto-Reply Error: {e}")
-        # ------------------------------------------------------------
 
         while True:
             settings = await settings_col.find_one({"user_id": user_id})
-            if not settings or settings.get("ad_status") != "Running 🚀":
+            if not settings:
+                await asyncio.sleep(5)
+                continue
+
+            ad_status = settings.get("ad_status", "Stopped ⛔")
+            
+            # If ads are not running, keep userbot alive for Auto-Reply / Harvesting without broadcasting
+            if ad_status != "Running 🚀":
+                await asyncio.sleep(5)
+                continue
+
+            if not log_msg:
+                try:
+                    log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**\nPreparing campaign logs...")
+                except:
+                    pass
+
+            ad = await ads_col.find_one({"user_id": user_id})
+            if not ad:
                 if log_msg:
-                    await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
-                break
-                
+                    try:
+                        await log_msg.edit_text("❌ **Error:** Advertisement text missing!")
+                    except:
+                        pass
+                await asyncio.sleep(10)
+                continue
+
             sent_count, failed_count = 0, 0
             fetched_groups_info = ""
             chat_ids_to_target = set()
@@ -654,11 +682,22 @@ async def ad_worker(bot_client, user_id):
 
             if dialog_count == 0:
                 if log_msg:
-                    await log_msg.edit_text("⏳ **Listening for active group chats...**")
+                    try:
+                        await log_msg.edit_text("⏳ **Listening for active group chats...**")
+                    except:
+                        pass
                 await asyncio.sleep(20)
                 continue
 
+            # BROADCAST LOOP WITH INSTANT STOP CHECK
+            stopped_midway = False
             for chat_id, chat_title in chat_ids_to_target:
+                # Instant check if user clicked Stop Ads mid-broadcast
+                current_settings = await settings_col.find_one({"user_id": user_id})
+                if not current_settings or current_settings.get("ad_status") != "Running 🚀":
+                    stopped_midway = True
+                    break
+
                 try:
                     await userbot.send_message(chat_id, ad["text"])
                     sent_count += 1
@@ -687,10 +726,19 @@ async def ad_worker(bot_client, user_id):
                 if log_msg:
                     try:
                         await log_msg.edit_text(live_status_text)
-                    except Exception:
+                    except:
                         pass
                 
                 await asyncio.sleep(3)
+
+            if stopped_midway:
+                if log_msg:
+                    try:
+                        await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
+                    except:
+                        pass
+                log_msg = None
+                continue
 
             cycle_summary_text = (
                 f"📊 **Cycle Completed! Sleeping for Interval...**\n\n"
@@ -703,15 +751,28 @@ async def ad_worker(bot_client, user_id):
             if log_msg:
                 try:
                     await log_msg.edit_text(cycle_summary_text)
-                except Exception:
+                except:
                     pass
+            log_msg = None
 
+            # Interval sleep with status check chunks
             interval_sec = settings.get("interval", 300)
-            await asyncio.sleep(interval_sec)
+            elapsed = 0
+            while elapsed < interval_sec:
+                await asyncio.sleep(5)
+                elapsed += 5
+                chk = await settings_col.find_one({"user_id": user_id})
+                if not chk or chk.get("ad_status") != "Running 🚀":
+                    break
             
-        await userbot.stop()
     except Exception as e:
         logger.error(f"Worker Error: {e}")
+    finally:
+        if userbot:
+            try:
+                await userbot.stop()
+            except:
+                pass
 
 @bot.on_callback_query(filters.regex("run_ads"))
 async def run_ads_cb(client, callback: CallbackQuery):
@@ -727,7 +788,7 @@ async def run_ads_cb(client, callback: CallbackQuery):
     if user_id in active_workers:
         active_workers[user_id].cancel()
 
-    task = asyncio.create_task(ad_worker(client, user_id))
+    task = asyncio.create_task(account_worker(client, user_id))
     active_workers[user_id] = task
     await callback.answer("🚀 Started!")
     await show_dashboard(callback, edit=True)
