@@ -133,7 +133,6 @@ async def start_handler(client, message: Message):
         custom_button_text = w_data.get("btn_text", "🚀 Start Using Bot") if w_data else "🚀 Start Using Bot"
         custom_button_url = w_data.get("btn_url") if w_data else None
 
-        # Custom and Continue buttons in separate rows
         buttons = []
         if custom_button_url:
             buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
@@ -210,7 +209,6 @@ async def show_dashboard(message_or_query, edit=False):
     except Exception:
         text = text_template
 
-    # Updated Layout with Welcome & Auto-Reply in separate rows
     btn_layout = [
         [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
         [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval")],
@@ -395,7 +393,7 @@ async def unified_text_handler(client, message: Message):
             await message.reply("❌ Invalid number! Please send seconds as digits (e.g. `300`).")
         return
 
-    # Set Welcome Input Handler (Text/Photo/Video + Custom Link Support)
+    # Set Welcome Input Handler
     if state["step"] == "waiting_welcome_msg":
         raw_text = message.caption or message.text or ""
         media_id = None
@@ -580,7 +578,7 @@ async def ar_edit_cb(client, callback: CallbackQuery):
     temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
     await callback.message.reply("Send your auto-reply message text:")
 
-# --- Run & Stop Ads Worker with LIVE LOGS AFTER EACH AD ---
+# --- Run & Stop Ads Worker with LIVE LOGS & AUTO-REPLY ---
 async def ad_worker(bot_client, user_id):
     log_msg = None
     try:
@@ -612,6 +610,19 @@ async def ad_worker(bot_client, user_id):
         async def live_group_harvester(client, message):
             if message.chat:
                 discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
+
+        # --- Userbot Auto-Reply / Welcome Handler for Private DMs ---
+        @userbot.on_message(filters.private & ~filters.me & ~filters.bot)
+        async def userbot_auto_reply(client, message):
+            try:
+                user_settings = await settings_col.find_one({"user_id": user_id})
+                if user_settings and user_settings.get("auto_reply", False):
+                    ar_text = user_settings.get("auto_reply_text")
+                    if ar_text:
+                        await message.reply_text(ar_text)
+            except Exception as e:
+                logger.error(f"Userbot Auto-Reply Error: {e}")
+        # ------------------------------------------------------------
 
         while True:
             settings = await settings_col.find_one({"user_id": user_id})
@@ -647,7 +658,6 @@ async def ad_worker(bot_client, user_id):
                 await asyncio.sleep(20)
                 continue
 
-            # REAL-TIME LOG UPDATING AFTER EACH GROUP AD SENT
             for chat_id, chat_title in chat_ids_to_target:
                 try:
                     await userbot.send_message(chat_id, ad["text"])
@@ -666,7 +676,6 @@ async def ad_worker(bot_client, user_id):
                     failed_count += 1
                     fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
 
-                # Real-time log message update
                 live_status_text = (
                     f"📢 **Live Broadcasting In Progress...**\n\n"
                     f"• Total Target Groups: `{dialog_count}`\n"
@@ -683,7 +692,6 @@ async def ad_worker(bot_client, user_id):
                 
                 await asyncio.sleep(3)
 
-            # End of Broadcast Cycle Log Summary
             cycle_summary_text = (
                 f"📊 **Cycle Completed! Sleeping for Interval...**\n\n"
                 f"• Total Groups: `{dialog_count}`\n"
