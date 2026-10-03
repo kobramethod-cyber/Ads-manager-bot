@@ -1,11 +1,11 @@
-import asyncio
+Import asyncio
 import sys
 
 # Force event loop creation for Python 3.14+ compatibility
 try:
-    loop = asyncio.get_event_loop()
+    Loop = asyncio.get_event_loop()
 except RuntimeError:
-    loop = asyncio.new_event_loop()
+    Loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
 import os
@@ -39,10 +39,10 @@ app_flask = Flask(__name__)
 
 @app_flask.route('/')
 def home():
-    return "Ads Manager Bot is running smoothly!"
+    Return "Ads Manager Bot is running smoothly!"
 
 def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
+    App_flask.run(host="0.0.0.0", port=PORT)
 
 # Initialize Bot Client
 bot = Client("ads_manager_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -57,7 +57,7 @@ settings_col = db["settings"]
 forcesub_col = db["forcesub"]
 admins_col = db["admins"]
 welcome_col = db["welcome_msg"]
-welcomed_dms_col = db["welcomed_dms"]  # Added to track DM welcome status per userbot
+welcomed_dms_col = db["welcomed_dms"]
 
 # Active running tasks dictionary
 active_workers = {}
@@ -77,48 +77,48 @@ DEFAULT_DASHBOARD_TEXT = (
 
 # --- Helper Functions ---
 async def is_admin(user_id: int):
-    if user_id == PRIMARY_ADMIN_ID:
-        return True
-    admin = await admins_col.find_one({"user_id": user_id})
-    return bool(admin)
+    If user_id == PRIMARY_ADMIN_ID:
+        Return True
+    Admin = await admins_col.find_one({"user_id": user_id})
+    Return bool(admin)
 
 async def check_forcesub(client, user_id):
-    try:
-        channels = await forcesub_col.find().to_list(length=100)
-        if not channels:
-            return []
+    Try:
+        Channels = await forcesub_col.find().to_list(length=100)
+        If not channels:
+            Return []
         
-        not_joined = []
-        for ch in channels:
-            ch_id = ch["channel"]
-            try:
-                member = await client.get_chat_member(ch_id, user_id)
-                if member.status in ["left", "kicked"]:
-                    not_joined.append(ch_id)
-            except Exception:
-                pass
+        Not_joined = []
+        For ch in channels:
+            Ch_id = ch["channel"]
+            Try:
+                Member = await client.get_chat_member(ch_id, user_id)
+                If member.status in ["left", "kicked"]:
+                    Not_joined.append(ch_id)
+            Except Exception:
+                Pass
                 
-        return not_joined
-    except Exception:
-        return []
+        Return not_joined
+    Except Exception:
+        Return []
 
 async def get_dashboard_config():
-    config = await settings_col.find_one({"type": "bot_config"})
-    pic = config.get("dashboard_pic", DEFAULT_DASHBOARD_PIC) if config else DEFAULT_DASHBOARD_PIC
-    text_template = config.get("dashboard_text", DEFAULT_DASHBOARD_TEXT) if config else DEFAULT_DASHBOARD_TEXT
-    return pic, text_template
+    Config = await settings_col.find_one({"type": "bot_config"})
+    Pic = config.get("dashboard_pic", DEFAULT_DASHBOARD_PIC) if config else DEFAULT_DASHBOARD_PIC
+    Text_template = config.get("dashboard_text", DEFAULT_DASHBOARD_TEXT) if config else DEFAULT_DASHBOARD_TEXT
+    Return pic, text_template
 
-# --- /start Command & Welcome Feature ---
+# --- /start Command & Welcome Feature (Welcome Message Removed for New Users) ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name or "User"
-    username = message.from_user.username or ""
+    User_id = message.from_user.id
+    First_name = message.from_user.first_name or "User"
+    Username = message.from_user.username or ""
     
-    user_exists = await users_col.find_one({"user_id": user_id})
+    User_exists = await users_col.find_one({"user_id": user_id})
     
-    # Custom Welcome for First Time Users
-    if not user_exists:
+    # Register new user without custom welcome message popup
+    If not user_exists:
         await users_col.insert_one({
             "user_id": user_id, 
             "first_name": first_name, 
@@ -126,37 +126,6 @@ async def start_handler(client, message: Message):
             "joined_date": message.date, 
             "bio_set": False
         })
-        
-        w_data = await welcome_col.find_one({"user_id": user_id}) or await welcome_col.find_one({"type": "default"})
-        
-        default_welcome_text = (
-            f"👋 **Hello {first_name}! Welcome to Ads Manager Bot.**\n\n"
-            "🤖 Is bot ke zariye aap apne Telegram accounts se automatic ads and messages groups me post kar sakte hain.\n\n"
-            "👇 Click below button to start:"
-        )
-        
-        welcome_text = w_data.get("text", default_welcome_text) if w_data else default_welcome_text
-        media_id = w_data.get("media_id") if w_data else None
-        media_type = w_data.get("media_type") if w_data else None
-        custom_button_text = w_data.get("btn_text", "🚀 Start Using Bot") if w_data else "🚀 Start Using Bot"
-        custom_button_url = w_data.get("btn_url") if w_data else None
-
-        buttons = []
-        if custom_button_url:
-            buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
-            buttons.append([InlineKeyboardButton("🚀 Go to Dashboard", callback_data="welcome_continue")])
-        else:
-            buttons.append([InlineKeyboardButton(custom_button_text, callback_data="welcome_continue")])
-
-        keyboard = InlineKeyboardMarkup(buttons)
-
-        if media_id and media_type == "photo":
-            await message.reply_photo(photo=media_id, caption=welcome_text, reply_markup=keyboard)
-        elif media_id and media_type == "video":
-            await message.reply_video(video=media_id, caption=welcome_text, reply_markup=keyboard)
-        else:
-            await message.reply_text(welcome_text, reply_markup=keyboard)
-        return
 
     # Update info if changed
     await users_col.update_one(
@@ -166,65 +135,48 @@ async def start_handler(client, message: Message):
     )
 
     # Check Force Sub for existing users
-    not_joined = await check_forcesub(client, user_id)
-    if not_joined and not await is_admin(user_id):
-        buttons = []
-        for ch in not_joined:
-            clean_ch = ch.replace('@','').replace('-100','')
-            buttons.append([InlineKeyboardButton("Join Channel", url=f"https://t.me/{clean_ch}")])
-        buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_forcesub")])
-        await message.reply("⚠️ **Please join our update channels first to use this bot!**", reply_markup=InlineKeyboardMarkup(buttons))
-        return
+    Not_joined = await check_forcesub(client, user_id)
+    If not_joined and not await is_admin(user_id):
+        Buttons = []
+        For ch in not_joined:
+            Clean_ch = ch.replace('@','').replace('-100','')
+            Buttons.append([InlineKeyboardButton("Join Channel", url=f"https://t.me/{clean_ch}")])
+        Buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_forcesub")])
+        Await message.reply("⚠️ **Please join our update channels first to use this bot!**", reply_markup=InlineKeyboardMarkup(buttons))
+        Return
 
-    await show_dashboard(message)
-
-# Welcome Button Callback Handler
-@bot.on_callback_query(filters.regex("^welcome_continue$"))
-async def welcome_continue_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    
-    not_joined = await check_forcesub(client, user_id)
-    if not_joined and not await is_admin(user_id):
-        buttons = []
-        for ch in not_joined:
-            clean_ch = ch.replace('@','').replace('-100','')
-            buttons.append([InlineKeyboardButton("Join Channel", url=f"https://t.me/{clean_ch}")])
-        buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_forcesub")])
-        await callback.message.reply("⚠️ **Please join our update channels first to use this bot!**", reply_markup=InlineKeyboardMarkup(buttons))
-        return
-
-    await show_dashboard(callback, edit=False)
+    Await show_dashboard(message)
 
 # --- Dashboard View ---
 async def show_dashboard(message_or_query, edit=False):
-    if isinstance(message_or_query, CallbackQuery):
-        user_id = message_or_query.from_user.id
-        msg = message_or_query.message
-    else:
-        user_id = message_or_query.from_user.id
-        msg = message_or_query
+    If isinstance(message_or_query, CallbackQuery):
+        User_id = message_or_query.from_user.id
+        Msg = message_or_query.message
+    Else:
+        User_id = message_or_query.from_user.id
+        Msg = message_or_query
 
-    acc_count = await accounts_col.count_documents({"user_id": user_id})
-    ad_data = await ads_col.find_one({"user_id": user_id})
-    settings = await settings_col.find_one({"user_id": user_id}) or {"interval": 300, "ad_status": "Stopped ⛔", "auto_reply": False}
+    Acc_count = await accounts_col.count_documents({"user_id": user_id})
+    Ad_data = await ads_col.find_one({"user_id": user_id})
+    Settings = await settings_col.find_one({"user_id": user_id}) or {"interval": 300, "ad_status": "Stopped ⛔", "auto_reply": False}
     
-    service_status = "Set ✅" if ad_data else "Not set ❌"
-    ad_status = settings.get("ad_status", "Stopped ⛔")
-    interval = settings.get("interval", 300)
+    Service_status = "Set ✅" if ad_data else "Not set ❌"
+    Ad_status = settings.get("ad_status", "Stopped ⛔")
+    Interval = settings.get("interval", 300)
     
-    dash_pic, text_template = await get_dashboard_config()
+    Dash_pic, text_template = await get_dashboard_config()
 
-    try:
-        text = text_template.format(
-            acc_count=acc_count,
-            service_status=service_status,
-            ad_status=ad_status,
-            interval=interval
+    Try:
+        Text = text_template.format(
+            Acc_count=acc_count,
+            Service_status=service_status,
+            Ad_status=ad_status,
+            Interval=interval
         )
-    except Exception:
-        text = text_template
+    Except Exception:
+        Text = text_template
 
-    btn_layout = [
+    Btn_layout = [
         [InlineKeyboardButton("👤 Manage Accounts", callback_data="manage_accounts"), InlineKeyboardButton("📢 Set Advertisement", callback_data="set_ad")],
         [InlineKeyboardButton("⏰ Interval & Delay", callback_data="set_interval")],
         [InlineKeyboardButton("👋 Set Welcome Message", callback_data="set_welcome")],
@@ -233,205 +185,205 @@ async def show_dashboard(message_or_query, edit=False):
         [InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
     ]
 
-    if await is_admin(user_id):
-        btn_layout.append([InlineKeyboardButton("👑 Admin Panel", callback_data="open_admin_panel")])
+    If await is_admin(user_id):
+        Btn_layout.append([InlineKeyboardButton("👑 Admin Panel", callback_data="open_admin_panel")])
 
-    keyboard = InlineKeyboardMarkup(btn_layout)
+    Keyboard = InlineKeyboardMarkup(btn_layout)
 
-    if edit:
-        try:
-            await msg.edit_media(
-                media=InputMediaPhoto(media=dash_pic, caption=text),
-                reply_markup=keyboard
+    If edit:
+        Try:
+            Await msg.edit_media(
+                Media=InputMediaPhoto(media=dash_pic, caption=text),
+                Reply_markup=keyboard
             )
-        except Exception:
-            await msg.edit_text(text, reply_markup=keyboard)
-    else:
-        try:
-            await msg.reply_photo(photo=dash_pic, caption=text, reply_markup=keyboard)
-        except Exception:
-            await msg.reply(text, reply_markup=keyboard)
+        Except Exception:
+            Await msg.edit_text(text, reply_markup=keyboard)
+    Else:
+        Try:
+            Await msg.reply_photo(photo=dash_pic, caption=text, reply_markup=keyboard)
+        Except Exception:
+            Await msg.reply(text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex("check_forcesub"))
 async def check_forcesub_cb(client, callback: CallbackQuery):
-    not_joined = await check_forcesub(client, callback.from_user.id)
-    if not_joined:
-        await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
-    else:
-        await callback.answer("✅ Verified successfully!")
-        await show_dashboard(callback, edit=True)
+    Not_joined = await check_forcesub(client, callback.from_user.id)
+    If not_joined:
+        Await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
+    Else:
+        Await callback.answer("✅ Verified successfully!")
+        Await show_dashboard(callback, edit=True)
 
 # --- Manage Accounts Flow ---
 @bot.on_callback_query(filters.regex("manage_accounts"))
 async def manage_accounts_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    accounts = await accounts_col.find({"user_id": user_id}).to_list(length=20)
+    User_id = callback.from_user.id
+    Accounts = await accounts_col.find({"user_id": user_id}).to_list(length=20)
     
-    if not accounts:
-        keyboard = InlineKeyboardMarkup([
+    If not accounts:
+        Keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Add Account", callback_data="add_account")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
         ])
-        await callback.message.edit_caption(caption="📋 **Your Accounts:**\n\nYou haven't added any Telegram accounts yet.", reply_markup=keyboard)
-        return
+        Await callback.message.edit_caption(caption="📋 **Your Accounts:**\n\nYou haven't added any Telegram accounts yet.", reply_markup=keyboard)
+        Return
 
-    keyboard_buttons = []
-    for acc in accounts:
-        keyboard_buttons.append([InlineKeyboardButton(f"📱 {acc['phone']} (❌ Remove)", callback_data=f"rem_acc_{acc['phone']}")])
+    Keyboard_buttons = []
+    For acc in accounts:
+        Keyboard_buttons.append([InlineKeyboardButton(f"📱 {acc['phone']} (❌ Remove)", callback_data=f"rem_acc_{acc['phone']}")])
     
-    keyboard_buttons.append([InlineKeyboardButton("➕ Add Another Account", callback_data="add_account")])
-    keyboard_buttons.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
+    Keyboard_buttons.append([InlineKeyboardButton("➕ Add Another Account", callback_data="add_account")])
+    Keyboard_buttons.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     
-    await callback.message.edit_caption(caption="📋 **Your Hosted Accounts:**\nClick on any account below to remove it:", reply_markup=InlineKeyboardMarkup(keyboard_buttons))
+    Await callback.message.edit_caption(caption="📋 **Your Hosted Accounts:**\nClick on any account below to remove it:", reply_markup=InlineKeyboardMarkup(keyboard_buttons))
 
 @bot.on_callback_query(filters.regex(r"^rem_acc_"))
 async def remove_account_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    phone = callback.data.replace("rem_acc_", "")
+    User_id = callback.from_user.id
+    Phone = callback.data.replace("rem_acc_", "")
     
-    await accounts_col.delete_one({"user_id": user_id, "phone": phone})
+    Await accounts_col.delete_one({"user_id": user_id, "phone": phone})
     
-    if user_id in active_workers:
-        active_workers[user_id].cancel()
-        del active_workers[user_id]
-        await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Stopped ⛔"}}, upsert=True)
+    If user_id in active_workers:
+        Active_workers[user_id].cancel()
+        Del active_workers[user_id]
+        Await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Stopped ⛔"}}, upsert=True)
         
-    await callback.answer(f"✅ Account {phone} removed successfully!", show_alert=True)
-    await manage_accounts_cb(client, callback)
+    Await callback.answer(f"✅ Account {phone} removed successfully!", show_alert=True)
+    Await manage_accounts_cb(client, callback)
 
 @bot.on_callback_query(filters.regex("add_account"))
 async def add_account_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    acc_count = await accounts_col.count_documents({"user_id": user_id})
-    if acc_count >= 20:
-        await callback.answer("⚠️ Maximum account limit (20) reached!", show_alert=True)
-        return
-    temp_sessions[user_id] = {"step": "waiting_phone"}
-    await callback.message.reply("Send your phone number with country code.\nExample: `+919876543210`")
+    User_id = callback.from_user.id
+    Acc_count = await accounts_col.count_documents({"user_id": user_id})
+    If acc_count >= 20:
+        Await callback.answer("⚠️ Maximum account limit (20) reached!", show_alert=True)
+        Return
+    Temp_sessions[user_id] = {"step": "waiting_phone"}
+    Await callback.message.reply("Send your phone number with country code.\nExample: `+919876543210`")
 
 # --- Set Welcome Setup ---
 @bot.on_callback_query(filters.regex("set_welcome"))
 async def set_welcome_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    temp_sessions[user_id] = {"step": "waiting_welcome_msg"}
-    instruction = (
+    User_id = callback.from_user.id
+    Temp_sessions[user_id] = {"step": "waiting_welcome_msg"}
+    Instruction = (
         "👋 **Set Custom Welcome Message**\n\n"
-        "Send welcome **text**, **photo**, or **video**.\n\n"
+        "Send welcome **text**, **photo**, or **video** for your hosted accounts DM.\n\n"
         "💡 **To add a button link, use format:**\n"
         "`Text Message | Button Name | https://yourlink.com`"
     )
-    await callback.message.reply(instruction)
+    Await callback.message.reply(instruction)
 
 # Unified Text/Media Router
 @bot.on_message(filters.private & (filters.text | filters.photo | filters.video))
 async def unified_text_handler(client, message: Message):
-    user_id = message.from_user.id
+    User_id = message.from_user.id
     
     # Admin States Handling
-    if user_id in admin_states:
-        state = admin_states[user_id]
-        del admin_states[user_id]
+    If user_id in admin_states:
+        State = admin_states[user_id]
+        Del admin_states[user_id]
         
-        if state == "wait_dash_pic":
-            pic_media = message.photo.file_id if message.photo else (message.text.strip() if message.text else None)
-            if pic_media:
-                await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_pic": pic_media}}, upsert=True)
-                await message.reply("✅ **Dashboard Photo Updated Successfully!**")
-            else:
-                await message.reply("❌ Invalid input!")
-            return
+        If state == "wait_dash_pic":
+            Pic_media = message.photo.file_id if message.photo else (message.text.strip() if message.text else None)
+            If pic_media:
+                Await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_pic": pic_media}}, upsert=True)
+                Await message.reply("✅ **Dashboard Photo Updated Successfully!**")
+            Else:
+                Await message.reply("❌ Invalid input!")
+            Return
 
-        elif state == "wait_dash_text":
-            if message.text:
-                await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_text": message.text}}, upsert=True)
-                await message.reply("✅ **Dashboard Text Updated Successfully!**")
-            return
+        Elif state == "wait_dash_text":
+            If message.text:
+                Await settings_col.update_one({"type": "bot_config"}, {"$set": {"dashboard_text": message.text}}, upsert=True)
+                Await message.reply("✅ **Dashboard Text Updated Successfully!**")
+            Return
 
-        elif state == "wait_add_admin":
-            try:
-                new_admin_id = int(message.text.strip())
-                await admins_col.update_one({"user_id": new_admin_id}, {"$set": {"user_id": new_admin_id}}, upsert=True)
-                await message.reply("✅ Admin added successfully!")
-            except Exception as e:
-                await message.reply(f"❌ Error: {e}")
-            return
-        elif state == "wait_rem_admin":
-            try:
-                rem_id = int(message.text.strip())
-                await admins_col.delete_one({"user_id": rem_id})
-                await message.reply("✅ Admin removed successfully!")
-            except Exception as e:
-                await message.reply(f"❌ Error: {e}")
-            return
-        elif state == "wait_add_fsub":
-            ch = message.text.strip()
-            await forcesub_col.update_one({"channel": ch}, {"$set": {"channel": ch}}, upsert=True)
-            await message.reply("✅ Force Sub channel added successfully!")
-            return
-        elif state == "wait_rem_fsub":
-            ch = message.text.strip()
-            await forcesub_col.delete_one({"channel": ch})
-            await message.reply("✅ Force Sub channel removed successfully!")
-            return
-        elif state == "wait_broadcast":
-            bc_text = message.text
-            users = await users_col.find().to_list(length=50000)
-            success, failed = 0, 0
-            status_msg = await message.reply("Broadcast Started...")
-            for u in users:
-                try:
-                    await client.send_message(u["user_id"], bc_text)
-                    success += 1
-                    await asyncio.sleep(0.1)
-                except:
-                    failed += 1
-            await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\nSuccess: `{success}`\nFailed: `{failed}`")
-            return
+        Elif state == "wait_add_admin":
+            Try:
+                New_admin_id = int(message.text.strip())
+                Await admins_col.update_one({"user_id": new_admin_id}, {"$set": {"user_id": new_admin_id}}, upsert=True)
+                Await message.reply("✅ Admin added successfully!")
+            Except Exception as e:
+                Await message.reply(f"❌ Error: {e}")
+            Return
+        Elif state == "wait_rem_admin":
+            Try:
+                Rem_id = int(message.text.strip())
+                Await admins_col.delete_one({"user_id": rem_id})
+                Await message.reply("✅ Admin removed successfully!")
+            Except Exception as e:
+                Await message.reply(f"❌ Error: {e}")
+            Return
+        Elif state == "wait_add_fsub":
+            Ch = message.text.strip()
+            Await forcesub_col.update_one({"channel": ch}, {"$set": {"channel": ch}}, upsert=True)
+            Await message.reply("✅ Force Sub channel added successfully!")
+            Return
+        Elif state == "wait_rem_fsub":
+            Ch = message.text.strip()
+            Await forcesub_col.delete_one({"channel": ch})
+            Await message.reply("✅ Force Sub channel removed successfully!")
+            Return
+        Elif state == "wait_broadcast":
+            Bc_text = message.text
+            Users = await users_col.find().to_list(length=50000)
+            Success, failed = 0, 0
+            Status_msg = await message.reply("Broadcast Started...")
+            For u in users:
+                Try:
+                    Await client.send_message(u["user_id"], bc_text)
+                    Success += 1
+                    Await asyncio.sleep(0.1)
+                Except:
+                    Failed += 1
+            Await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\nSuccess: `{success}`\nFailed: `{failed}`")
+            Return
 
-    if user_id not in temp_sessions:
-        return
+    If user_id not in temp_sessions:
+        Return
     
-    state = temp_sessions[user_id]
+    State = temp_sessions[user_id]
     
     # Custom Interval Input Flow
-    if state["step"] == "waiting_custom_interval":
-        try:
-            seconds = int(message.text.strip())
-            if seconds < 10:
-                await message.reply("⚠️ Interval must be at least 10 seconds!")
-                return
-            await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": seconds}}, upsert=True)
-            del temp_sessions[user_id]
-            await message.reply(f"✅ **Interval updated to `{seconds}` seconds!**")
-            await show_dashboard(message)
-        except ValueError:
-            await message.reply("❌ Invalid number! Please send seconds as digits (e.g. `300`).")
-        return
+    If state["step"] == "waiting_custom_interval":
+        Try:
+            Seconds = int(message.text.strip())
+            If seconds < 10:
+                Await message.reply("⚠️ Interval must be at least 10 seconds!")
+                Return
+            Await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": seconds}}, upsert=True)
+            Del temp_sessions[user_id]
+            Await message.reply(f"✅ **Interval updated to `{seconds}` seconds!**")
+            Await show_dashboard(message)
+        Except ValueError:
+            Await message.reply("❌ Invalid number! Please send seconds as digits (e.g. `300`).")
+        Return
 
     # Set Welcome Input Handler
-    if state["step"] == "waiting_welcome_msg":
-        raw_text = message.caption or message.text or ""
-        media_id = None
-        media_type = None
+    If state["step"] == "waiting_welcome_msg":
+        Raw_text = message.caption or message.text or ""
+        Media_id = None
+        Media_type = None
         
-        if message.photo:
-            media_id = message.photo.file_id
-            media_type = "photo"
-        elif message.video:
-            media_id = message.video.file_id
-            media_type = "video"
+        If message.photo:
+            Media_id = message.photo.file_id
+            Media_type = "photo"
+        Elif message.video:
+            Media_id = message.video.file_id
+            Media_type = "video"
 
-        btn_text, btn_url = None, None
-        if "|" in raw_text:
-            parts = [p.strip() for p in raw_text.split("|")]
-            w_text = parts[0]
-            if len(parts) >= 3:
-                btn_text = parts[1]
-                btn_url = parts[2]
-        else:
-            w_text = raw_text
+        Btn_text, btn_url = None, None
+        If "|" in raw_text:
+            Parts = [p.strip() for p in raw_text.split("|")]
+            W_text = parts[0]
+            If len(parts) >= 3:
+                Btn_text = parts[1]
+                Btn_url = parts[2]
+        Else:
+            W_text = raw_text
 
-        await welcome_col.update_one(
+        Await welcome_col.update_one(
             {"user_id": user_id},
             {"$set": {
                 "user_id": user_id,
@@ -443,122 +395,122 @@ async def unified_text_handler(client, message: Message):
             }},
             upsert=True
         )
-        del temp_sessions[user_id]
-        await message.reply("✅ **Welcome Message Saved Successfully!**")
-        await show_dashboard(message)
-        return
+        Del temp_sessions[user_id]
+        Await message.reply("✅ **Welcome Message Saved Successfully!**")
+        Await show_dashboard(message)
+        Return
 
     # Add Account Steps
-    if state["step"] == "waiting_phone":
-        phone = message.text.strip()
-        state["phone"] = phone
-        try:
-            userbot = Client(f"temp_session_{user_id}", api_id=API_ID, api_hash=API_HASH, in_memory=True)
-            await userbot.connect()
-            sent_code = await userbot.send_code(phone)
-            state["userbot"] = userbot
-            state["phone_code_hash"] = sent_code.phone_code_hash
-            state["step"] = "waiting_otp"
-            logger.info(f"Userbot login OTP sent for phone {phone}")
-            await message.reply("OTP has been sent to your Telegram account.\n\nEnter OTP (e.g. 1 2 3 4 5):")
-        except Exception as e:
-            logger.error(f"Userbot login send_code error: {e}")
-            await message.reply(f"❌ Error: {str(e)}\nTry again /start")
-            del temp_sessions[user_id]
+    If state["step"] == "waiting_phone":
+        Phone = message.text.strip()
+        State["phone"] = phone
+        Try:
+            Userbot = Client(f"temp_session_{user_id}", api_id=API_ID, api_hash=API_HASH, in_memory=True)
+            Await userbot.connect()
+            Sent_code = await userbot.send_code(phone)
+            State["userbot"] = userbot
+            State["phone_code_hash"] = sent_code.phone_code_hash
+            State["step"] = "waiting_otp"
+            Logger.info(f"Userbot login OTP sent for phone {phone}")
+            Await message.reply("OTP has been sent to your Telegram account.\n\nEnter OTP (e.g. 1 2 3 4 5):")
+        Except Exception as e:
+            Logger.error(f"Userbot login send_code error: {e}")
+            Await message.reply(f"❌ Error: {str(e)}\nTry again /start")
+            Del temp_sessions[user_id]
             
-    elif state["step"] == "waiting_otp":
-        otp = message.text.strip().replace(" ", "")
-        userbot = state["userbot"]
-        phone = state["phone"]
-        hash_code = state["phone_code_hash"]
+    Elif state["step"] == "waiting_otp":
+        Otp = message.text.strip().replace(" ", "")
+        Userbot = state["userbot"]
+        Phone = state["phone"]
+        Hash_code = state["phone_code_hash"]
         
-        try:
-            await userbot.sign_in(phone, hash_code, otp)
-            session_string = await userbot.export_session_string()
-            await accounts_col.insert_one({"user_id": user_id, "phone": phone, "session_string": session_string})
-            await userbot.disconnect()
-            del temp_sessions[user_id]
-            logger.info(f"Userbot successfully logged in and added for user {user_id} ({phone})")
+        Try:
+            Await userbot.sign_in(phone, hash_code, otp)
+            Session_string = await userbot.export_session_string()
+            Await accounts_col.insert_one({"user_id": user_id, "phone": phone, "session_string": session_string})
+            Await userbot.disconnect()
+            Del temp_sessions[user_id]
+            Logger.info(f"Userbot successfully logged in and added for user {user_id} ({phone})")
             
             # Ensure worker is active
-            if user_id in active_workers:
-                try:
-                    active_workers[user_id].cancel()
-                except Exception:
-                    pass
-            task = asyncio.create_task(account_worker(client, user_id))
-            active_workers[user_id] = task
+            If user_id in active_workers:
+                Try:
+                    Active_workers[user_id].cancel()
+                Except Exception:
+                    Pass
+            Task = asyncio.create_task(account_worker(bot, user_id))
+            Active_workers[user_id] = task
             
-            await message.reply("✅ Account Added Successfully!")
-            await show_dashboard(message)
-        except SessionPasswordNeeded:
-            state["step"] = "waiting_password"
-            await message.reply("Two-Step Verification detected.\n\nEnter your password:")
-        except Exception as e:
-            logger.error(f"Userbot sign_in OTP error: {e}")
-            await message.reply(f"❌ Error: {str(e)}\nStart over with /start")
-            del temp_sessions[user_id]
+            Await message.reply("✅ Account Added Successfully!")
+            Await show_dashboard(message)
+        Except SessionPasswordNeeded:
+            State["step"] = "waiting_password"
+            Await message.reply("Two-Step Verification detected.\n\nEnter your password:")
+        Except Exception as e:
+            Logger.error(f"Userbot sign_in OTP error: {e}")
+            Await message.reply(f"❌ Error: {str(e)}\nStart over with /start")
+            Del temp_sessions[user_id]
 
-    elif state["step"] == "waiting_password":
-        password = message.text.strip()
-        userbot = state["userbot"]
-        try:
-            await userbot.check_password(password)
-            session_string = await userbot.export_session_string()
-            await accounts_col.insert_one({"user_id": user_id, "phone": state["phone"], "session_string": session_string})
-            await userbot.disconnect()
-            del temp_sessions[user_id]
-            logger.info(f"Userbot successfully logged in with 2FA for user {user_id}")
+    Elif state["step"] == "waiting_password":
+        Password = message.text.strip()
+        Userbot = state["userbot"]
+        Try:
+            Await userbot.check_password(password)
+            Session_string = await userbot.export_session_string()
+            Await accounts_col.insert_one({"user_id": user_id, "phone": state["phone"], "session_string": session_string})
+            Await userbot.disconnect()
+            Del temp_sessions[user_id]
+            Logger.info(f"Userbot successfully logged in with 2FA for user {user_id}")
             
-            if user_id in active_workers:
-                try:
-                    active_workers[user_id].cancel()
-                except Exception:
-                    pass
-            task = asyncio.create_task(account_worker(client, user_id))
-            active_workers[user_id] = task
+            If user_id in active_workers:
+                Try:
+                    Active_workers[user_id].cancel()
+                Except Exception:
+                    Pass
+            Task = asyncio.create_task(account_worker(bot, user_id))
+            Active_workers[user_id] = task
             
-            await message.reply("✅ Account Added Successfully with 2FA!")
-            await show_dashboard(message)
-        except Exception as e:
-            logger.error(f"Userbot 2FA password error: {e}")
-            await message.reply(f"❌ Password Error: {str(e)}\nStart over with /start")
-            del temp_sessions[user_id]
+            Await message.reply("✅ Account Added Successfully with 2FA!")
+            Await show_dashboard(message)
+        Except Exception as e:
+            Logger.error(f"Userbot 2FA password error: {e}")
+            Await message.reply(f"❌ Password Error: {str(e)}\nStart over with /start")
+            Del temp_sessions[user_id]
 
-    elif state["step"] == "waiting_ad_text":
-        ad_text = message.text
-        await ads_col.update_one({"user_id": user_id}, {"$set": {"text": ad_text}}, upsert=True)
-        del temp_sessions[user_id]
-        await message.reply("✅ Advertisement Saved Successfully!")
-        await show_dashboard(message)
+    Elif state["step"] == "waiting_ad_text":
+        Ad_text = message.text
+        Await ads_col.update_one({"user_id": user_id}, {"$set": {"text": ad_text}}, upsert=True)
+        Del temp_sessions[user_id]
+        Await message.reply("✅ Advertisement Saved Successfully!")
+        Await show_dashboard(message)
 
-    elif state["step"] == "waiting_autoreply_text":
-        ar_text = message.text
-        await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply_text": ar_text, "auto_reply": True}}, upsert=True)
-        del temp_sessions[user_id]
-        await message.reply("✅ Auto Reply Enabled & Message Saved!")
-        if user_id not in active_workers or active_workers[user_id].done():
-            task = asyncio.create_task(account_worker(client, user_id))
-            active_workers[user_id] = task
-        await show_dashboard(message)
+    Elif state["step"] == "waiting_autoreply_text":
+        Ar_text = message.text
+        Await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply_text": ar_text, "auto_reply": True}}, upsert=True)
+        Del temp_sessions[user_id]
+        Await message.reply("✅ Auto Reply Enabled & Message Saved!")
+        If user_id not in active_workers or active_workers[user_id].done():
+            Task = asyncio.create_task(account_worker(bot, user_id))
+            Active_workers[user_id] = task
+        Await show_dashboard(message)
 
 # --- Set Advertisement ---
 @bot.on_callback_query(filters.regex("set_ad"))
 async def set_ad_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    temp_sessions[user_id] = {"step": "waiting_ad_text"}
-    await callback.message.reply("Send advertisement text:")
+    User_id = callback.from_user.id
+    Temp_sessions[user_id] = {"step": "waiting_ad_text"}
+    Await callback.message.reply("Send advertisement text:")
 
 # --- Interval & Delay Menu ---
 @bot.on_callback_query(filters.regex("set_interval"))
 async def set_interval_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    user_setting = await settings_col.find_one({"user_id": user_id})
-    current_sec = user_setting.get("interval", 300) if user_setting else 300
+    User_id = callback.from_user.id
+    User_setting = await settings_col.find_one({"user_id": user_id})
+    Current_sec = user_setting.get("interval", 300) if user_setting else 300
 
-    caption_text = (
+    Caption_text = (
         "╰_╯ **SET BROADCAST CYCLE INTERVAL**\n\n"
-        f"**Current Interval:** `{current_sec} seconds`\n\n"
+        F"**Current Interval:** `{current_sec} seconds`\n\n"
         "**Recommended Intervals:**\n"
         "• 300s - Aggressive (5 min) 🔴\n"
         "• 600s - Safe & Balanced (10 min) 🟡\n"
@@ -567,248 +519,248 @@ async def set_interval_cb(client, callback: CallbackQuery):
         "*(Note: using short time interval for broadcasting can get your Account on high risk.)*"
     )
 
-    keyboard = InlineKeyboardMarkup([
+    Keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("300s (5 Min)", callback_data="int_300"), InlineKeyboardButton("600s (10 Min)", callback_data="int_600")],
         [InlineKeyboardButton("1200s (20 Min)", callback_data="int_1200"), InlineKeyboardButton("1800s (30 Min)", callback_data="int_1800")],
         [InlineKeyboardButton("✏ Custom Time", callback_data="int_custom")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
     
-    try:
-        await callback.message.edit_caption(caption=caption_text, reply_markup=keyboard)
-    except Exception:
-        await callback.message.reply(caption_text, reply_markup=keyboard)
+    Try:
+        Await callback.message.edit_caption(caption=caption_text, reply_markup=keyboard)
+    Except Exception:
+        Await callback.message.reply(caption_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex(r"^int_"))
 async def save_interval_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    val = callback.data.split("_")[1]
+    User_id = callback.from_user.id
+    Val = callback.data.split("_")[1]
     
-    if val == "custom":
-        temp_sessions[user_id] = {"step": "waiting_custom_interval"}
-        await callback.message.reply("✏️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
-        return
+    If val == "custom":
+        Temp_sessions[user_id] = {"step": "waiting_custom_interval"}
+        Await callback.message.reply("✏️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
+        Return
 
-    interval_sec = int(val)
-    await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": interval_sec}}, upsert=True)
-    await callback.answer(f"✅ Interval set to {interval_sec} seconds!")
-    await show_dashboard(callback, edit=True)
+    Interval_sec = int(val)
+    Await settings_col.update_one({"user_id": user_id}, {"$set": {"interval": interval_sec}}, upsert=True)
+    Await callback.answer(f"✅ Interval set to {interval_sec} seconds!")
+    Await show_dashboard(callback, edit=True)
 
 # --- Auto Reply Menu ---
 @bot.on_callback_query(filters.regex("auto_reply"))
 async def auto_reply_menu(client, callback: CallbackQuery):
-    keyboard = InlineKeyboardMarkup([
+    Keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("Enable 🟢", callback_data="ar_enable"), InlineKeyboardButton("Disable 🔴", callback_data="ar_disable")],
         [InlineKeyboardButton("Edit Message 📝", callback_data="ar_edit")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
-    await callback.message.edit_caption(caption="🤖 **Auto Reply Settings**\nConfigure automated response for incoming direct messages on your userbots.", reply_markup=keyboard)
+    Await callback.message.edit_caption(caption="🤖 **Auto Reply Settings**\nConfigure automated response for incoming direct messages on your userbots.", reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex("ar_enable"))
 async def ar_enable_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply": True}}, upsert=True)
+    User_id = callback.from_user.id
+    Await settings_col.update_one({"user_id": user_id}, {"$set": {"auto_reply": True}}, upsert=True)
     
-    if user_id not in active_workers or active_workers[user_id].done():
-        task = asyncio.create_task(account_worker(client, user_id))
-        active_workers[user_id] = task
+    If user_id not in active_workers or active_workers[user_id].done():
+        Task = asyncio.create_task(account_worker(bot, user_id))
+        Active_workers[user_id] = task
 
-    await callback.answer("✅ Auto Reply Enabled")
-    logger.info(f"Auto-reply enabled for user {user_id}")
-    await show_dashboard(callback, edit=True)
+    Await callback.answer("✅ Auto Reply Enabled")
+    Logger.info(f"Auto-reply enabled for user {user_id}")
+    Await show_dashboard(callback, edit=True)
 
 @bot.on_callback_query(filters.regex("ar_disable"))
 async def ar_disable_cb(client, callback: CallbackQuery):
-    await settings_col.update_one({"user_id": callback.from_user.id}, {"$set": {"auto_reply": False}}, upsert=True)
-    await callback.answer("❌ Auto Reply Disabled")
-    logger.info(f"Auto-reply disabled for user {callback.from_user.id}")
-    await show_dashboard(callback, edit=True)
+    Await settings_col.update_one({"user_id": callback.from_user.id}, {"$set": {"auto_reply": False}}, upsert=True)
+    Await callback.answer("❌ Auto Reply Disabled")
+    Logger.info(f"Auto-reply disabled for user {callback.from_user.id}")
+    Await show_dashboard(callback, edit=True)
 
 @bot.on_callback_query(filters.regex("ar_edit"))
 async def ar_edit_cb(client, callback: CallbackQuery):
-    temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
-    await callback.message.reply("Send your auto-reply message text:")
+    Temp_sessions[callback.from_user.id] = {"step": "waiting_autoreply_text"}
+    Await callback.message.reply("Send your auto-reply message text:")
 
 # --- Robust Account Worker with Fault Tolerance & Welcome/Auto-Reply Logic ---
 async def account_worker(bot_client, user_id):
-    log_msg = None
-    userbot = None
-    logger.info(f"Worker task initialized for user {user_id}")
+    Log_msg = None
+    Userbot = None
+    Logger.info(f"Worker task initialized for user {user_id}")
     
-    while True:
-        try:
-            account = await accounts_col.find_one({"user_id": user_id})
-            if not account:
-                logger.info(f"No accounts found for user {user_id}. Worker terminating.")
-                break
+    While True:
+        Try:
+            Account = await accounts_col.find_one({"user_id": user_id})
+            If not account:
+                Logger.info(f"No accounts found for user {user_id}. Worker terminating.")
+                Break
                 
-            if userbot is None or not userbot.is_connected:
-                userbot = Client(
-                    f"worker_{user_id}", 
-                    session_string=account["session_string"], 
-                    api_id=API_ID, 
-                    api_hash=API_HASH, 
-                    in_memory=True
+            If userbot is None or not userbot.is_connected:
+                Userbot = Client(
+                    F"worker_{user_id}", 
+                    Session_string=account["session_string"], 
+                    Api_id=API_ID, 
+                    Api_hash=API_HASH, 
+                    In_memory=True
                 )
-                await userbot.start()
-                logger.info(f"Userbot connected successfully for user {user_id}")
+                Await userbot.start()
+                Logger.info(f"Userbot connected successfully for user {user_id}")
 
             # Update Bio once if not set
-            user_db_data = await users_col.find_one({"user_id": user_id})
-            if user_db_data and not user_db_data.get("bio_set", False):
-                try:
-                    await userbot.invoke(UpdateProfile(about="Free Auto ads via @adsmanage13_bot"))
-                    await users_col.update_one({"user_id": user_id}, {"$set": {"bio_set": True}})
-                except Exception as bio_err:
-                    logger.error(f"Bio set error for user {user_id}: {bio_err}")
+            User_db_data = await users_col.find_one({"user_id": user_id})
+            If user_db_data and not user_db_data.get("bio_set", False):
+                Try:
+                    Await userbot.invoke(UpdateProfile(about="Free Auto ads via @adsmanage13_bot"))
+                    Await users_col.update_one({"user_id": user_id}, {"$set": {"bio_set": True}})
+                Except Exception as bio_err:
+                    Logger.error(f"Bio set error for user {user_id}: {bio_err}")
 
-            discovered_groups = set()
+            Discovered_groups = set()
 
             @userbot.on_message(filters.group)
             async def live_group_harvester(client, message):
-                if message.chat:
-                    discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
+                If message.chat:
+                    Discovered_groups.add((message.chat.id, message.chat.title or "Unnamed Group"))
 
             # --- Userbot Welcome & Auto-Reply Handler for Private DMs ---
             @userbot.on_message(filters.private & ~filters.me & ~filters.bot)
             async def userbot_dm_handler(client, message):
-                try:
-                    sender_id = message.from_user.id
-                    userbot_me = await client.get_me()
-                    userbot_id = userbot_me.id
+                Try:
+                    Sender_id = message.from_user.id
+                    Userbot_me = await client.get_me()
+                    Userbot_id = userbot_me.id
 
                     # Check if already welcomed in private DM for this specific userbot
-                    welcomed = await welcomed_dms_col.find_one({"userbot_id": userbot_id, "sender_id": sender_id})
+                    Welcomed = await welcomed_dms_col.find_one({"userbot_id": userbot_id, "sender_id": sender_id})
                     
-                    if not welcomed:
+                    If not welcomed:
                         # Fetch custom welcome message configuration from main bot settings
-                        w_data = await welcome_col.find_one({"user_id": user_id}) or await welcome_col.find_one({"type": "default"})
+                        W_data = await welcome_col.find_one({"user_id": user_id}) or await welcome_col.find_one({"type": "default"})
                         
-                        default_welcome_text = (
-                            f"👋 **Hello {message.from_user.first_name or 'User'}! Welcome.**\n\n"
+                        Default_welcome_text = (
+                            F"👋 **Hello {message.from_user.first_name or 'User'}! Welcome.**\n\n"
                             "🤖 This is an automated account managed via Ads Manager Bot."
                         )
                         
-                        welcome_text = w_data.get("text", default_welcome_text) if w_data else default_welcome_text
-                        media_id = w_data.get("media_id") if w_data else None
-                        media_type = w_data.get("media_type") if w_data else None
-                        custom_button_text = w_data.get("btn_text", "🚀 Open Bot") if w_data else "🚀 Open Bot"
-                        custom_button_url = w_data.get("btn_url") if w_data else None
+                        Welcome_text = w_data.get("text", default_welcome_text) if w_data else default_welcome_text
+                        Media_id = w_data.get("media_id") if w_data else None
+                        Media_type = w_data.get("media_type") if w_data else None
+                        Custom_button_text = w_data.get("btn_text", "🚀 Open Bot") if w_data else "🚀 Open Bot"
+                        Custom_button_url = w_data.get("btn_url") if w_data else None
 
-                        buttons = []
-                        if custom_button_url:
-                            buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
+                        Buttons = []
+                        If custom_button_url:
+                            Buttons.append([InlineKeyboardButton(custom_button_text, url=custom_button_url)])
                         
-                        keyboard = InlineKeyboardMarkup(buttons) if buttons else None
+                        Keyboard = InlineKeyboardMarkup(buttons) if buttons else None
 
-                        if media_id and media_type == "photo":
-                            await message.reply_photo(photo=media_id, caption=welcome_text, reply_markup=keyboard)
-                        elif media_id and media_type == "video":
-                            await message.reply_video(video=media_id, caption=welcome_text, reply_markup=keyboard)
-                        else:
-                            await message.reply_text(welcome_text, reply_markup=keyboard)
+                        If media_id and media_type == "photo":
+                            Await message.reply_photo(photo=media_id, caption=welcome_text, reply_markup=keyboard)
+                        Elif media_id and media_type == "video":
+                            Await message.reply_video(video=media_id, caption=welcome_text, reply_markup=keyboard)
+                        Else:
+                            Await message.reply_text(welcome_text, reply_markup=keyboard)
 
                         # Mark as welcomed so it never triggers again for this sender on this userbot
-                        await welcomed_dms_col.insert_one({"userbot_id": userbot_id, "sender_id": sender_id})
-                        logger.info(f"Welcome message sent to DM sender {sender_id} by userbot {userbot_id}")
-                        return
+                        Await welcomed_dms_col.insert_one({"userbot_id": userbot_id, "sender_id": sender_id})
+                        Logger.info(f"Welcome message sent to DM sender {sender_id} by userbot {userbot_id}")
+                        Return
 
                     # Subsequent messages: Trigger Auto-Reply if enabled
-                    user_settings = await settings_col.find_one({"user_id": user_id})
-                    if user_settings and user_settings.get("auto_reply", False):
-                        ar_text = user_settings.get("auto_reply_text")
-                        if ar_text:
-                            await message.reply_text(ar_text)
-                            logger.info(f"Auto-reply triggered for userbot {userbot_id} to sender {sender_id}")
-                except Exception as e:
-                    logger.error(f"Userbot DM Handler Error for user {user_id}: {e}")
+                    User_settings = await settings_col.find_one({"user_id": user_id})
+                    If user_settings and user_settings.get("auto_reply", False):
+                        Ar_text = user_settings.get("auto_reply_text")
+                        If ar_text:
+                            Await message.reply_text(ar_text)
+                            Logger.info(f"Auto-reply triggered for userbot {userbot_id} to sender {sender_id}")
+                Except Exception as e:
+                    Logger.error(f"Userbot DM Handler Error for user {user_id}: {e}")
 
-            while True:
-                settings = await settings_col.find_one({"user_id": user_id})
-                if not settings:
-                    await asyncio.sleep(5)
-                    continue
+            While True:
+                Settings = await settings_col.find_one({"user_id": user_id})
+                If not settings:
+                    Await asyncio.sleep(5)
+                    Continue
 
-                ad_status = settings.get("ad_status", "Stopped ⛔")
+                Ad_status = settings.get("ad_status", "Stopped ⛔")
                 
                 # If ads are not running, keep userbot alive for Auto-Reply / Harvesting without broadcasting
-                if ad_status != "Running 🚀":
-                    await asyncio.sleep(5)
-                    continue
+                If ad_status != "Running 🚀":
+                    Await asyncio.sleep(5)
+                    Continue
 
-                if not log_msg:
-                    try:
-                        log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**\nPreparing campaign logs...")
-                    except Exception:
-                        pass
+                If not log_msg:
+                    Try:
+                        Log_msg = await bot_client.send_message(user_id, "🚀 **Ad Worker Initialized!**\nPreparing campaign logs...")
+                    Except Exception:
+                        Pass
 
-                ad = await ads_col.find_one({"user_id": user_id})
-                if not ad:
-                    if log_msg:
-                        try:
-                            await log_msg.edit_text("❌ **Error:** Advertisement text missing!")
-                        except Exception:
-                            pass
-                    await asyncio.sleep(10)
-                    continue
+                Ad = await ads_col.find_one({"user_id": user_id})
+                If not ad:
+                    If log_msg:
+                        Try:
+                            Await log_msg.edit_text("❌ **Error:** Advertisement text missing!")
+                        Except Exception:
+                            Pass
+                    Await asyncio.sleep(10)
+                    Continue
 
-                sent_count, failed_count = 0, 0
-                fetched_groups_info = ""
-                chat_ids_to_target = set()
+                Sent_count, failed_count = 0, 0
+                Fetched_groups_info = ""
+                Chat_ids_to_target = set()
                 
-                try:
-                    r = await userbot.invoke(GetDialogs(offset_date=0, offset_id=0, offset_peer=InputPeerEmpty(), limit=500, hash=0))
-                    for chat in r.chats:
-                        if hasattr(chat, "title") and (chat.__class__.__name__ in ["Chat", "Channel"]):
-                            if chat.__class__.__name__ == "Channel":
-                                if getattr(chat, "megagroup", False):
-                                    chat_ids_to_target.add((int(f"-100{chat.id}"), chat.title))
-                            else:
-                                chat_ids_to_target.add((int(f"-{chat.id}"), chat.title))
-                except Exception as raw_err:
-                    logger.error(f"Raw MTProto dialog fetch error for user {user_id}: {raw_err}")
+                Try:
+                    R = await userbot.invoke(GetDialogs(offset_date=0, offset_id=0, offset_peer=InputPeerEmpty(), limit=500, hash=0))
+                    For chat in r.chats:
+                        If hasattr(chat, "title") and (chat.__class__.__name__ in ["Chat", "Channel"]):
+                            If chat.__class__.__name__ == "Channel":
+                                If getattr(chat, "megagroup", False):
+                                    Chat_ids_to_target.add((int(f"-100{chat.id}"), chat.title))
+                            Else:
+                                Chat_ids_to_target.add((int(f"-{chat.id}"), chat.title))
+                Except Exception as raw_err:
+                    Logger.error(f"Raw MTProto dialog fetch error for user {user_id}: {raw_err}")
 
-                for g_id, g_title in discovered_groups:
-                    chat_ids_to_target.add((g_id, g_title))
+                For g_id, g_title in discovered_groups:
+                    Chat_ids_to_target.add((g_id, g_title))
 
-                dialog_count = len(chat_ids_to_target)
+                Dialog_count = len(chat_ids_to_target)
 
-                if dialog_count == 0:
-                    if log_msg:
-                        try:
-                            await log_msg.edit_text("⏳ **Listening for active group chats...**")
-                        except Exception:
-                            pass
-                    await asyncio.sleep(20)
-                    continue
+                If dialog_count == 0:
+                    If log_msg:
+                        Try:
+                            Await log_msg.edit_text("⏳ **Listening for active group chats...**")
+                        Except Exception:
+                            Pass
+                    Await asyncio.sleep(20)
+                    Continue
 
                 # BROADCAST LOOP WITH INSTANT STOP CHECK
-                stopped_midway = False
-                for chat_id, chat_title in chat_ids_to_target:
-                    current_settings = await settings_col.find_one({"user_id": user_id})
-                    if not current_settings or current_settings.get("ad_status") != "Running 🚀":
-                        stopped_midway = True
-                        break
+                Stopped_midway = False
+                For chat_id, chat_title in chat_ids_to_target:
+                    Current_settings = await settings_col.find_one({"user_id": user_id})
+                    If not current_settings or current_settings.get("ad_status") != "Running 🚀":
+                        Stopped_midway = True
+                        Break
 
-                    try:
-                        await userbot.send_message(chat_id, ad["text"])
-                        sent_count += 1
-                        fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
-                    except FloodWait as fw:
-                        logger.warning(f"FloodWait encountered for user {user_id}: sleeping {fw.value}s")
-                        await asyncio.sleep(fw.value)
-                        try:
-                            await userbot.send_message(chat_id, ad["text"])
-                            sent_count += 1
-                            fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
-                        except Exception:
-                            failed_count += 1
-                            fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
-                    except Exception:
-                        failed_count += 1
-                        fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+                    Try:
+                        Await userbot.send_message(chat_id, ad["text"])
+                        Sent_count += 1
+                        Fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
+                    Except FloodWait as fw:
+                        Logger.warning(f"FloodWait encountered for user {user_id}: sleeping {fw.value}s")
+                        Await asyncio.sleep(fw.value)
+                        Try:
+                            Await userbot.send_message(chat_id, ad["text"])
+                            Sent_count += 1
+                            Fetched_groups_info += f"\n• {chat_title} ➔ Sent ✅"
+                        Except Exception:
+                            Failed_count += 1
+                            Fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
+                    Except Exception:
+                        Failed_count += 1
+                        Fetched_groups_info += f"\n• {chat_title} ➔ Failed ❌"
 
-                    live_status_text = (
+                    Live_status_text = (
                         f"📢 **Live Broadcasting In Progress...**\n\n"
                         f"• Total Target Groups: `{dialog_count}`\n"
                         f"• Successfully Sent: `{sent_count}` ✅\n"
@@ -816,24 +768,24 @@ async def account_worker(bot_client, user_id):
                         f"📋 **Live Send Logs:**\n"
                         f"{fetched_groups_info[-2000:]}"
                     )
-                    if log_msg:
-                        try:
-                            await log_msg.edit_text(live_status_text)
-                        except Exception:
-                            pass
+                    If log_msg:
+                        Try:
+                            Await log_msg.edit_text(live_status_text)
+                        Except Exception:
+                            Pass
                     
-                    await asyncio.sleep(3)
+                    Await asyncio.sleep(3)
 
-                if stopped_midway:
-                    if log_msg:
-                        try:
-                            await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
-                        except Exception:
-                            pass
-                    log_msg = None
-                    continue
+                If stopped_midway:
+                    If log_msg:
+                        Try:
+                            Await log_msg.edit_text("⛔ **Ad Campaign Stopped.**")
+                        Except Exception:
+                            Pass
+                    Log_msg = None
+                    Continue
 
-                cycle_summary_text = (
+                Cycle_summary_text = (
                     f"📊 **Cycle Completed! Sleeping for Interval...**\n\n"
                     f"• Total Groups: `{dialog_count}`\n"
                     f"• Sent: `{sent_count}` ✅\n"
@@ -841,75 +793,75 @@ async def account_worker(bot_client, user_id):
                     f"📋 **Final Logs:**\n"
                     f"{fetched_groups_info[-2000:]}"
                 )
-                if log_msg:
-                    try:
-                        await log_msg.edit_text(cycle_summary_text)
-                    except Exception:
-                        pass
-                log_msg = None
+                If log_msg:
+                    Try:
+                        Await log_msg.edit_text(cycle_summary_text)
+                    Except Exception:
+                        Pass
+                Log_msg = None
 
                 # Interval sleep with status check chunks
-                interval_sec = settings.get("interval", 300)
-                elapsed = 0
-                while elapsed < interval_sec:
-                    await asyncio.sleep(5)
-                    elapsed += 5
-                    chk = await settings_col.find_one({"user_id": user_id})
-                    if not chk or chk.get("ad_status") != "Running 🚀":
-                        break
+                Interval_sec = settings.get("interval", 300)
+                Elapsed = 0
+                While elapsed < interval_sec:
+                    Await asyncio.sleep(5)
+                    Elapsed += 5
+                    Chk = await settings_col.find_one({"user_id": user_id})
+                    If not chk or chk.get("ad_status") != "Running 🚀":
+                        Break
 
-        except Exception as worker_err:
-            logger.error(f"Worker crashed for user {user_id}: {worker_err}. Attempting auto-restart in 10 seconds...")
-            await asyncio.sleep(10)
-        finally:
-            if userbot:
-                try:
-                    await userbot.stop()
-                except Exception:
-                    pass
-                userbot = None
+        Except Exception as worker_err:
+            Logger.error(f"Worker crashed for user {user_id}: {worker_err}. Attempting auto-restart in 10 seconds...")
+            Await asyncio.sleep(10)
+        Finally:
+            If userbot:
+                Try:
+                    Await userbot.stop()
+                Except Exception:
+                    Pass
+                Userbot = None
 
 @bot.on_callback_query(filters.regex("run_ads"))
 async def run_ads_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    ad = await ads_col.find_one({"user_id": user_id})
-    acc = await accounts_col.find_one({"user_id": user_id})
+    User_id = callback.from_user.id
+    Ad = await ads_col.find_one({"user_id": user_id})
+    Acc = await accounts_col.find_one({"user_id": user_id})
     
-    if not ad or not acc:
-        await callback.answer("⚠️ Set ad & account first!", show_alert=True)
-        return
+    If not ad or not acc:
+        Await callback.answer("⚠️ Set ad & account first!", show_alert=True)
+        Return
         
-    await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Running 🚀"}}, upsert=True)
-    if user_id in active_workers:
-        try:
-            active_workers[user_id].cancel()
-        except Exception:
-            pass
+    Await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Running 🚀"}}, upsert=True)
+    If user_id in active_workers:
+        Try:
+            Active_workers[user_id].cancel()
+        Except Exception:
+            Pass
 
-    task = asyncio.create_task(account_worker(client, user_id))
-    active_workers[user_id] = task
-    logger.info(f"Ads manually started for user {user_id}")
-    await callback.answer("🚀 Started!")
-    await show_dashboard(callback, edit=True)
+    Task = asyncio.create_task(account_worker(bot, user_id))
+    Active_workers[user_id] = task
+    Logger.info(f"Ads manually started for user {user_id}")
+    Await callback.answer("🚀 Started!")
+    Await show_dashboard(callback, edit=True)
 
 @bot.on_callback_query(filters.regex("stop_ads"))
 async def stop_ads_cb(client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Stopped ⛔"}}, upsert=True)
-    if user_id in active_workers:
-        try:
-            active_workers[user_id].cancel()
-        except Exception:
-            pass
-        del active_workers[user_id]
-    logger.info(f"Ads manually stopped for user {user_id}")
-    await callback.answer("⛔ Stopped!")
-    await show_dashboard(callback, edit=True)
+    User_id = callback.from_user.id
+    Await settings_col.update_one({"user_id": user_id}, {"$set": {"ad_status": "Stopped ⛔"}}, upsert=True)
+    If user_id in active_workers:
+        Try:
+            Active_workers[user_id].cancel()
+        Except Exception:
+            Pass
+        Del active_workers[user_id]
+    Logger.info(f"Ads manually stopped for user {user_id}")
+    Await callback.answer("⛔ Stopped!")
+    Await show_dashboard(callback, edit=True)
 
 # --- About Bot Handler ---
 @bot.on_callback_query(filters.regex("about_bot"))
 async def about_cb(client, callback: CallbackQuery):
-    about_text = (
+    About_text = (
         "🤖 **ABOUT ADS MANAGER BOT**\n\n"
         "Welcome to the ultimate **Telegram Ads & Broadcast Manager Bot**! "
         "Is bot ki madad se aap apne Multiple Telegram Accounts ko manage kar sakte hain "
@@ -925,24 +877,24 @@ async def about_cb(client, callback: CallbackQuery):
         "💬 **Support & Inquiries:** Contact Developer for custom bot setups or help!\n\n"
         "─── **Powered by @PANDA_1125** ───"
     )
-    keyboard = InlineKeyboardMarkup([
+    Keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("👨‍‍💻 Developer", url="https://t.me/PANDA_1125")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
-    await callback.message.edit_caption(caption=about_text, reply_markup=keyboard)
+    Await callback.message.edit_caption(caption=about_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex("back_home"))
 async def back_home_cb(client, callback: CallbackQuery):
-    await show_dashboard(callback, edit=True)
+    Await show_dashboard(callback, edit=True)
 
 # --- Admin Panel & User Accounts Feature ---
 @bot.on_callback_query(filters.regex("^open_admin_panel$"))
 async def open_admin_panel_cb(client, callback: CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("Unauthorized!", show_alert=True)
-        return
+    If not await is_admin(callback.from_user.id):
+        Await callback.answer("Unauthorized!", show_alert=True)
+        Return
 
-    keyboard = InlineKeyboardMarkup([
+    Keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Set Photo", callback_data="adm_set_pic"), InlineKeyboardButton("📝 Edit Text", callback_data="adm_set_text")],
         [InlineKeyboardButton("👑 Add Admin", callback_data="adm_add"), InlineKeyboardButton("❌ Remove Admin", callback_data="adm_rem")],
         [InlineKeyboardButton("📋 Admin List", callback_data="adm_list"), InlineKeyboardButton("🔒 Add Force Sub", callback_data="fsub_add")],
@@ -951,23 +903,23 @@ async def open_admin_panel_cb(client, callback: CallbackQuery):
         [InlineKeyboardButton("📢 Broadcast", callback_data="adm_bc"), InlineKeyboardButton("📊 Statistics", callback_data="adm_stats")],
         [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="back_home")]
     ])
-    await callback.message.edit_caption(caption="👑 **Admin Control Panel**", reply_markup=keyboard)
+    Await callback.message.edit_caption(caption="👑 **Admin Control Panel**", reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex(r"^(adm_|fsub_|back_admin)"))
 async def admin_buttons_cb(client, callback: CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("Unauthorized!", show_alert=True)
-        return
+    If not await is_admin(callback.from_user.id):
+        Await callback.answer("Unauthorized!", show_alert=True)
+        Return
         
-    data = callback.data
-    user_id = callback.from_user.id
+    Data = callback.data
+    User_id = callback.from_user.id
     
-    if data == "adm_set_pic":
-        admin_states[user_id] = "wait_dash_pic"
-        await callback.message.reply("Send photo OR direct photo URL to set as dashboard image:")
-    elif data == "adm_set_text":
-        admin_states[user_id] = "wait_dash_text"
-        instruction = (
+    If data == "adm_set_pic":
+        Admin_states[user_id] = "wait_dash_pic"
+        Await callback.message.reply("Send photo OR direct photo URL to set as dashboard image:")
+    Elif data == "adm_set_text":
+        Admin_states[user_id] = "wait_dash_text"
+        Instruction = (
             "Send the new text for Dashboard.\n\n"
             "You can use these placeholders to insert dynamic stats:\n"
             "• `{acc_count}` - Number of hosted accounts\n"
@@ -975,124 +927,120 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
             "• `{ad_status}` - Ad running status\n"
             "• `{interval}` - Interval in seconds"
         )
-        await callback.message.reply(instruction)
-    elif data == "adm_add":
-        admin_states[user_id] = "wait_add_admin"
-        await callback.message.reply("Send the Telegram User ID of the new admin:")
-    elif data == "adm_rem":
-        admin_states[user_id] = "wait_rem_admin"
-        await callback.message.reply("Send the Telegram User ID of the admin to remove:")
-    elif data == "adm_list":
-        admins = await admins_col.find().to_list(length=100)
-        text = f"📋 **Admin List:**\nPrimary Admin: `{PRIMARY_ADMIN_ID}`\n"
-        for a in admins:
-            text += f"- `{a['user_id']}`\n"
-        await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
-    elif data.startswith("adm_users_page_"):
-        page = int(data.split("_")[-1])
-        limit = 5
-        users_list = await users_col.find().skip(page * limit).limit(limit).to_list(length=limit)
-        total_users = await users_col.count_documents({})
+        Await callback.message.reply(instruction)
+    Elif data == "adm_add":
+        Admin_states[user_id] = "wait_add_admin"
+        Await callback.message.reply("Send the Telegram User ID of the new admin:")
+    Elif data == "adm_rem":
+        Admin_states[user_id] = "wait_rem_admin"
+        Await callback.message.reply("Send the Telegram User ID of the admin to remove:")
+    Elif data == "adm_list":
+        Admins = await admins_col.find().to_list(length=100)
+        Text = f"📋 **Admin List:**\nPrimary Admin: `{PRIMARY_ADMIN_ID}`\n"
+        For a in admins:
+            Text += f"- `{a['user_id']}`\n"
+        Await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
+    Elif data.startswith("adm_users_page_"):
+        Page = int(data.split("_")[-1])
+        Limit = 5
+        Users_list = await users_col.find().skip(page * limit).limit(limit).to_list(length=limit)
+        Total_users = await users_col.count_documents({})
         
-        if not users_list and page > 0:
-            # Fallback if page out of bounds
-            page = 0
-            users_list = await users_col.find().skip(0).limit(limit).to_list(length=limit)
+        If not users_list and page > 0:
+            Page = 0
+            Users_list = await users_col.find().skip(0).limit(limit).to_list(length=limit)
 
-        text = f"👥 **Registered User Accounts** (Page `{page + 1}` / `{(total_users + limit - 1) // limit or 1}`):\n\n"
+        Text = f"👥 **Registered User Accounts** (Page `{page + 1}` / `{(total_users + limit - 1) // limit or 1}`):\n\n"
         
-        for u in users_list:
-            uid = u.get("user_id")
-            name = u.get("first_name", "User")
-            uname = u.get("username", "")
-            uname_str = f"@{uname}" if uname else "N/A"
-            profile_link = f"tg://user?id={uid}"
+        For u in users_list:
+            Uid = u.get("user_id")
+            Name = u.get("first_name", "User")
+            Uname = u.get("username", "")
+            Uname_str = f"@{uname}" if uname else "N/A"
+            Profile_link = f"tg://user?id={uid}"
             
-            # Fetch hosted accounts for this user
-            accs = await accounts_col.find({"user_id": uid}).to_list(length=20)
-            acc_count = len(accs)
+            Accs = await accounts_col.find({"user_id": uid}).to_list(length=20)
+            Acc_count = len(accs)
             
-            text += f"👤 User: {name}\n"
-            text += f"🆔 ID: `{uid}`\n"
-            text += f"📛 Username: {uname_str}\n"
-            text += f"🔗 Profile: {profile_link}\n"
+            Text += f"👤 User: {name}\n"
+            Text += f"🆔 ID: `{uid}`\n"
+            Text += f"📛 Username: {uname_str}\n"
+            Text += f"🔗 Profile: {profile_link}\n"
             
-            if accs:
-                text += "📱 Hosted Accounts:\n"
-                for acc in accs:
-                    text += f"• `{acc.get('phone')}`\n"
-            else:
-                text += "📱 Hosted Accounts: None\n"
+            If accs:
+                Text += "📱 Hosted Accounts:\n"
+                For acc in accs:
+                    Text += f"• `{acc.get('phone')}`\n"
+            Else:
+                Text += "📱 Hosted Accounts: None\n"
                 
-            text += f"Total Accounts: `{acc_count}`\n\n"
+            Text += f"Total Accounts: `{acc_count}`\n\n"
             
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"adm_users_page_{page - 1}"))
-        if (page + 1) * limit < total_users:
-            nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"adm_users_page_{page + 1}"))
+        Nav_buttons = []
+        If page > 0:
+            Nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"adm_users_page_{page - 1}"))
+        If (page + 1) * limit < total_users:
+            Nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"adm_users_page_{page + 1}"))
             
-        keyboard_rows = []
-        if nav_buttons:
-            keyboard_rows.append(nav_buttons)
-        keyboard_rows.append([InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="open_admin_panel")])
+        Keyboard_rows = []
+        If nav_buttons:
+            Keyboard_rows.append(nav_buttons)
+        Keyboard_rows.append([InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="open_admin_panel")])
         
-        await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard_rows))
-    elif data == "fsub_add":
-        admin_states[user_id] = "wait_add_fsub"
-        await callback.message.reply("Send channel username or private ID (`@channel` or `-100xxx`):")
-    elif data == "fsub_rem":
-        admin_states[user_id] = "wait_rem_fsub"
-        await callback.message.reply("Send channel username or ID to remove:")
-    elif data == "fsub_list":
-        subs = await forcesub_col.find().to_list(length=100)
-        text = "📋 **Force Sub Channels:**\n"
-        for s in subs:
-            text += f"- `{s['channel']}`\n"
-        await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
-    elif data == "adm_bc":
-        admin_states[user_id] = "wait_broadcast"
-        await callback.message.reply("Send the broadcast message:")
-    elif data == "adm_stats":
-        total_users = await users_col.count_documents({})
-        total_accs = await accounts_col.count_documents({})
-        text = f"📊 **Bot Statistics:**\n\nTotal Users: `{total_users}`\nHosted Accounts: `{total_accs}`"
-        await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
+        Await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard_rows))
+    Elif data == "fsub_add":
+        Admin_states[user_id] = "wait_add_fsub"
+        Await callback.message.reply("Send channel username or private ID (`@channel` or `-100xxx`):")
+    Elif data == "fsub_rem":
+        Admin_states[user_id] = "wait_rem_fsub"
+        Await callback.message.reply("Send channel username or ID to remove:")
+    Elif data == "fsub_list":
+        Subs = await forcesub_col.find().to_list(length=100)
+        Text = "📋 **Force Sub Channels:**\n"
+        For s in subs:
+            Text += f"- `{s['channel']}`\n"
+        Await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
+    Elif data == "adm_bc":
+        Admin_states[user_id] = "wait_broadcast"
+        Await callback.message.reply("Send the broadcast message:")
+    Elif data == "adm_stats":
+        Total_users = await users_col.count_documents({})
+        Total_accs = await accounts_col.count_documents({})
+        Text = f"📊 **Bot Statistics:**\n\nTotal Users: `{total_users}`\nHosted Accounts: `{total_accs}`"
+        Await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
 
 # --- Startup Worker Recovery Hook ---
 async def restore_active_workers():
-    """Automatically restore workers from MongoDB when the bot restarts or redeploys."""
-    await asyncio.sleep(3) # Wait for client to stabilize
-    try:
-        cursor = settings_col.find({"ad_status": "Running 🚀"})
-        async for setting in cursor:
-            user_id = setting.get("user_id")
-            if user_id and user_id not in active_workers:
-                acc_exists = await accounts_col.find_one({"user_id": user_id})
-                if acc_exists:
-                    task = asyncio.create_task(account_worker(bot, user_id))
-                    active_workers[user_id] = task
-                    logger.info(f"Restored active background worker for user {user_id} upon startup.")
-    except Exception as e:
-        logger.error(f"Error restoring active workers: {e}")
+    Await asyncio.sleep(3)
+    Try:
+        Cursor = settings_col.find({"ad_status": "Running 🚀"})
+        Async for setting in cursor:
+            User_id = setting.get("user_id")
+            If user_id and user_id not in active_workers:
+                Acc_exists = await accounts_col.find_one({"user_id": user_id})
+                If acc_exists:
+                    Task = asyncio.create_task(account_worker(bot, user_id))
+                    Active_workers[user_id] = task
+                    Logger.info(f"Restored active background worker for user {user_id} upon startup.")
+    Except Exception as e:
+        Logger.error(f"Error restoring active workers: {e}")
 
 # --- Main Entry Point ---
-if __name__ == "__main__":
-    import threading
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+If __name__ == "__main__":
+    Import threading
+    Flask_thread = threading.Thread(target=run_flask)
+    Flask_thread.daemon = True
+    Flask_thread.start()
     
     @bot.on_raw_update()
     async def startup_hook(client, update, users, chats):
-        # Trigger worker restoration once on startup
-        global worker_restored
-        try:
-            if not globals().get("worker_restored", False):
-                globals()["worker_restored"] = True
-                asyncio.create_task(restore_active_workers())
-        except Exception:
-            pass
+        Global worker_restored
+        Try:
+            If not globals().get("worker_restored", False):
+                Globals()["worker_restored"] = True
+                Asyncio.create_task(restore_active_workers())
+        Except Exception:
+            Pass
 
-    print("Bot is starting...")
-    bot.run()
+    Print("Bot is starting...")
+    Bot.run()
