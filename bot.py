@@ -530,7 +530,7 @@ async def save_interval_cb(client, callback: CallbackQuery):
     
     if val == "custom":
         temp_sessions[user_id] = {"step": "waiting_custom_interval"}
-        await callback.message.reply("✏️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
+        await callback.message.reply("✏️️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
         return
 
     interval_sec = int(val)
@@ -861,7 +861,7 @@ async def about_cb(client, callback: CallbackQuery):
         "─── **Powered by @PANDA_1125** ───"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👨‍‍‍💻 Developer", url="https://t.me/PANDA_1125")],
+        [InlineKeyboardButton("👨💻 Developer", url="https://t.me/PANDA_1125")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
     ])
     await callback.message.edit_caption(caption=about_text, reply_markup=keyboard)
@@ -882,13 +882,13 @@ async def open_admin_panel_cb(client, callback: CallbackQuery):
         [InlineKeyboardButton("👑 Add Admin", callback_data="adm_add"), InlineKeyboardButton("❌ Remove Admin", callback_data="adm_rem")],
         [InlineKeyboardButton("📋 Admin List", callback_data="adm_list"), InlineKeyboardButton("🔒 Add Force Sub", callback_data="fsub_add")],
         [InlineKeyboardButton("🔓 Remove Force Sub", callback_data="fsub_rem"), InlineKeyboardButton("📋 Force Sub List", callback_data="fsub_list")],
-        [InlineKeyboardButton("👥 User Accounts", callback_data="adm_users_page_0")],
+        [InlineKeyboardButton("👥 User Accounts", callback_data="adm_users_page_0"), InlineKeyboardButton("🚀 Restart & Run Ads All", callback_data="admin_run_ads_all")],
         [InlineKeyboardButton("📢 Broadcast", callback_data="adm_bc"), InlineKeyboardButton("📊 Statistics", callback_data="adm_stats")],
         [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="back_home")]
     ])
     await callback.message.edit_caption(caption="👑 **Admin Control Panel**", reply_markup=keyboard)
 
-@bot.on_callback_query(filters.regex(r"^(adm_|fsub_|back_admin)"))
+@bot.on_callback_query(filters.regex(r"^(adm_|fsub_|admin_run_ads_all|back_admin)"))
 async def admin_buttons_cb(client, callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("Unauthorized!", show_alert=True)
@@ -923,24 +923,69 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         for a in admins:
             text += f"- `{a['user_id']}`\n"
         await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
+    elif data == "admin_run_ads_all":
+        # Find all user IDs who have at least one account added
+        pipeline = [
+            {"$group": {"_id": "$user_id"}}
+        ]
+        hosted_user_ids = [doc["_id"] async for doc in accounts_col.aggregate(pipeline)]
+        
+        started_count = 0
+        for uid in hosted_user_ids:
+            # Check if user has ad text set
+            ad = await ads_col.find_one({"user_id": uid})
+            if ad:
+                await settings_col.update_one({"user_id": uid}, {"$set": {"ad_status": "Running 🚀"}}, upsert=True)
+                if uid in active_workers:
+                    try:
+                        active_workers[uid].cancel()
+                    except Exception:
+                        pass
+                task = asyncio.create_task(account_worker(bot, uid))
+                active_workers[uid] = task
+                started_count += 1
+                
+        await callback.answer(f"🚀 Restarted & Running Ads for {started_count} users with accounts!", show_alert=True)
     elif data.startswith("adm_users_page_"):
         page = int(data.split("_")[-1])
         limit = 5
-        users_list = await users_col.find().skip(page * limit).limit(limit).to_list(length=limit)
-        total_users = await users_col.count_documents({})
         
-        if not users_list and page > 0:
+        # Aggregate pipeline to get only users who have hosted accounts
+        pipeline = [
+            {"$group": {"_id": "$user_id"}},
+            {"$skip": page * limit},
+            {"$limit": limit}
+        ]
+        hosted_user_cursor = accounts_col.aggregate(pipeline)
+        hosted_user_ids = [doc["_id"] async for doc in hosted_user_cursor]
+        
+        # Count total distinct users who have hosted accounts
+        total_pipeline = [
+            {"$group": {"_id": "$user_id"}},
+            {"$count": "total"}
+        ]
+        total_cursor = await accounts_col.aggregate(total_pipeline).to_list(length=1)
+        total_users = total_cursor[0]["total"] if total_cursor else 0
+        
+        if not hosted_user_ids and page > 0:
             page = 0
-            users_list = await users_col.find().skip(0).limit(limit).to_list(length=limit)
+            pipeline = [
+                {"$group": {"_id": "$user_id"}},
+                {"$skip": 0},
+                {"$limit": limit}
+            ]
+            hosted_user_ids = [doc["_id"] async for doc in accounts_col.aggregate(pipeline)]
 
-        text = f"👥 **Registered User Accounts** (Page `{page + 1}` / `{(total_users + limit - 1) // limit or 1}`):\n\n"
+        text = f"👥 **Users With Hosted Accounts** (Page `{page + 1}` / `{(total_users + limit - 1) // limit or 1}`):\n\n"
         
-        for u in users_list:
-            uid = u.get("user_id")
+        for uid in hosted_user_ids:
+            u = await users_col.find_one({"user_id": uid}) or {}
             name = u.get("first_name", "User")
             uname = u.get("username", "")
             uname_str = f"@{uname}" if uname else "N/A"
-            profile_link = f"tg://user?id={uid}"
+            
+            # Formatted clickable profile link in Markdown
+            profile_link = f"[Click Here](tg://user?id={uid})"
             
             accs = await accounts_col.find({"user_id": uid}).to_list(length=20)
             acc_count = len(accs)
@@ -963,7 +1008,7 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         if page > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"adm_users_page_{page - 1}"))
         if (page + 1) * limit < total_users:
-            nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"adm_users_page_{page + 1}"))
+            nav_buttons.append(InlineKeyboardButton("Next ➡️️", callback_data=f"adm_users_page_{page + 1}"))
             
         keyboard_rows = []
         if nav_buttons:
@@ -1019,6 +1064,7 @@ if __name__ == "__main__":
     async def startup_hook(client, update, users, chats):
         global worker_restored
         try:
+            if not globals().get("worker_restored", False) else None
             if not globals().get("worker_restored", False):
                 globals()["worker_restored"] = True
                 asyncio.create_task(restore_active_workers())
