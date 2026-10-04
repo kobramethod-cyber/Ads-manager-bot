@@ -924,7 +924,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
             text += f"- `{a['user_id']}`\n"
         await callback.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="open_admin_panel")]]))
     elif data == "admin_run_ads_all":
-        # Find all user IDs who have at least one account added
         pipeline = [
             {"$group": {"_id": "$user_id"}}
         ]
