@@ -530,7 +530,7 @@ async def save_interval_cb(client, callback: CallbackQuery):
     
     if val == "custom":
         temp_sessions[user_id] = {"step": "waiting_custom_interval"}
-        await callback.message.reply("✏️️ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
+        await callback.message.reply("✏ **Send time interval in seconds:**\n(Example: Send `300` for 5 minutes)")
         return
 
     interval_sec = int(val)
@@ -932,7 +932,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         
         started_count = 0
         for uid in hosted_user_ids:
-            # Check if user has ad text set
             ad = await ads_col.find_one({"user_id": uid})
             if ad:
                 await settings_col.update_one({"user_id": uid}, {"$set": {"ad_status": "Running 🚀"}}, upsert=True)
@@ -950,7 +949,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         page = int(data.split("_")[-1])
         limit = 5
         
-        # Aggregate pipeline to get only users who have hosted accounts
         pipeline = [
             {"$group": {"_id": "$user_id"}},
             {"$skip": page * limit},
@@ -959,7 +957,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         hosted_user_cursor = accounts_col.aggregate(pipeline)
         hosted_user_ids = [doc["_id"] async for doc in hosted_user_cursor]
         
-        # Count total distinct users who have hosted accounts
         total_pipeline = [
             {"$group": {"_id": "$user_id"}},
             {"$count": "total"}
@@ -984,7 +981,6 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
             uname = u.get("username", "")
             uname_str = f"@{uname}" if uname else "N/A"
             
-            # Formatted clickable profile link in Markdown
             profile_link = f"[Click Here](tg://user?id={uid})"
             
             accs = await accounts_col.find({"user_id": uid}).to_list(length=20)
@@ -1008,7 +1004,7 @@ async def admin_buttons_cb(client, callback: CallbackQuery):
         if page > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"adm_users_page_{page - 1}"))
         if (page + 1) * limit < total_users:
-            nav_buttons.append(InlineKeyboardButton("Next ➡️️", callback_data=f"adm_users_page_{page + 1}"))
+            nav_buttons.append(InlineKeyboardButton("Next ➡", callback_data=f"adm_users_page_{page + 1}"))
             
         keyboard_rows = []
         if nav_buttons:
@@ -1062,9 +1058,7 @@ if __name__ == "__main__":
     
     @bot.on_raw_update()
     async def startup_hook(client, update, users, chats):
-        global worker_restored
         try:
-            if not globals().get("worker_restored", False) else None
             if not globals().get("worker_restored", False):
                 globals()["worker_restored"] = True
                 asyncio.create_task(restore_active_workers())
